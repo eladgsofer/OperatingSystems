@@ -30,10 +30,10 @@ int main() {
         for (int j=0;j<N;j++)
             pthread_mutex_init(&board_locks[i][j],PTHREAD_MUTEX_ERRORCHECK);
 
-    for (i=0;i<AGENTS;i++)
+    /*for (i=0;i<AGENTS;i++)
     {
         pthread_create(&agents[i],NULL, startAgent, &i);
-    }
+    }*/
 
     return 0;
 }//gcc t91.c -l pthread
@@ -68,8 +68,9 @@ void startAgent(int agentId)
             case 1:
                 pthread_mutex_lock(&board_locks[0][N-1]);
                 pthread_mutex_lock(&board_locks[1][N-1]);
-                if (!board[0][N-1] && !board[1][N-1])
-                    pthread_create(carEntity)
+                //if (!board[0][N-1] && !board[1][N-1])
+                    //pthread_create(carEntity)
+
                 pthread_mutex_unlock(&board_locks[0][N-1]);
                 pthread_mutex_unlock(&board_locks[1][N-1]);
                 break;
