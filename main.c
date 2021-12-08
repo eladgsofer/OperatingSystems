@@ -52,7 +52,6 @@ typedef struct Board{
 void initBoard();
 
 _Noreturn void printBoard();
-
 _Noreturn void generateCar(void* carGen);
 void initCarAgent(carGenerator* carGen, int agentId);
 void carEntity(void* args);
@@ -150,6 +149,7 @@ void initBoard() {
                 exit(EXIT_FAILURE);
             }
 
+    pthread_mutex_init(&board.carListMutex, NULL);
     // Initialize LinkedList deletion mutex
 
     if (pthread_mutex_init(&board.carListMutex, NULL)){
@@ -179,8 +179,9 @@ _Noreturn void generateCar(void* carGen)
     carGenerator* carGenObj = (carGenerator*)carGen;
 
     while (1){
-        rand_interval = (rand() % (MAX_INTER_ARRIVAL_IN_NS - MIN_INTER_ARRIVAL_IN_NS + 1)) + MIN_INTER_ARRIVAL_IN_NS;
-        sleep(rand_interval);
+
+        rand_interval = rand()%(MAX_INTER_ARRIVAL_IN_NS - MIN_INTER_ARRIVAL_IN_NS) + MIN_INTER_ARRIVAL_IN_NS;
+        usleep(rand_interval / (double)1000); // Convert [nsec] to [usec]
         // generate a car in the board
 
         CarNode* newCar = (struct CarNode*)malloc(sizeof(CarNode));
@@ -204,37 +205,9 @@ _Noreturn void generateCar(void* carGen)
         pthread_mutex_unlock(&board.mutexBoard[carGenObj->curCell.x][carGenObj->curCell.y]);
         pthread_mutex_unlock(&board.mutexBoard[carGenObj->prevCell.x][carGenObj->prevCell.y]);
 
-
-
     }
 }
 
-
-//gcc t91.c -l pthread
-/*
-*
-*
-pthread_self();
-pthread_create();
-pthread_mutex_init();
-if (pthread_mutex_lock(&lock,NULL)!=0){
-    printf("mutex failed");
-    return 1
-}
-pthread_mutex_trylock(); // try.. wil lreturn error if not working
-pthread_mutex_unlock();*/
-
-// array of mutexes for each square...
-
-
-//    0  1  2  ... N-2 N-1
-//0   X                X
-//1      @  @  ...  @
-//2      @  @  ...  @ 
-//.      .  .  
-//N-2    @  @       @
-//N-1 X                X
-//
 void closeSystem(int returnCode) {
     CarNode* tempNode;
 
@@ -355,6 +328,4 @@ Cell get_next_position(Cell curr_pos) {
 int on_corner(Cell curr_pos) {
     return ((curr_pos.x == 0 || curr_pos.x == N - 1) && (curr_pos.y == 0 || curr_pos.y == N - 1));
 }
-void producer() {
-    printf("Hello producer id:%d", pthread_self());
-}
+
