@@ -18,25 +18,39 @@
 // scheduler is aware of mutex...
 // double matrix of [][] mutexes..
 
-pthread_mutex_t board_locks[N][N];
-int board[N][N] = {0};
+pthread_mutex_t mutexBoard[N][N];
+char charsBoard[N][N];
 pthread_t agents[4];
 pthread_t cars[4*N];
 
 int main() {
-    int i;
-    // Initialize mutex board
-    for(i=0;i<N;i+=N-1)
-        for (int j=0;j<N;j++)
-            pthread_mutex_init(&board_locks[i][j],PTHREAD_MUTEX_ERRORCHECK);
 
-    /*for (i=0;i<AGENTS;i++)
-    {
-        pthread_create(&agents[i],NULL, startAgent, &i);
-    }*/
+
 
     return 0;
-}//gcc t91.c -l pthread
+}
+
+void initBoard(){
+    int i, j;
+    // Initialize Mutex rows & columns
+    for(i=0;i<N;i+=N-1)
+        for (j=0;j<N;j++)
+            if (pthread_mutex_init(&mutexBoard[i][j], NULL) || pthread_mutex_init(&mutexBoard[j][i], NULL)){
+                perror("Error in initializing panel mutex!\n");
+                exit(EXIT_FAILURE);
+            }
+
+    // Initialize board chars
+    for (i=0;i<N;i++)
+        for (j=0;j<N;j++)
+        {
+            if (i==0 || j==0)
+                charsBoard[i][j] = ' ';
+            else
+                charsBoard[i][j] = '@';
+        }
+}
+//gcc t91.c -l pthread
     /*
  *
  *
