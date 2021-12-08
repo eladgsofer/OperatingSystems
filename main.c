@@ -58,17 +58,9 @@ Cell get_next_position(Cell curr_pos);
 pthread_t agents[4];
 pthread_t cars[4 * N];
 
-typedef struct car_position {
-    int x;
-    int y;
-    int just_born;
-} car_pos;
 
 Board board;
-
-
-Board board;
-
+carGenerator carAgents[4];
 
 void initCarAgent(carGenerator* carGen, int agentId){
     carGen->agentId = agentId;
@@ -117,7 +109,7 @@ int main() {
     initBoard();
 
     // boardPrinter & carGenerators Threads
-    carGenerator carAgents[4];
+
     pthread_t boardPrinter;
 
     // Create Station threads
@@ -249,7 +241,7 @@ void closeSystem() {
 
     // close the generating agents
     for (int i = 0;i < 4;i++) {
-        pthread_cancel(agents[i]);
+        pthread_cancel(carAgents[i].genThread);
     }
     // close all the cars(threads and memory)
     while (board.doublyLL != NULL) {
@@ -262,12 +254,12 @@ void closeSystem() {
     pthread_cancel(board.printThread); // TODO: change this to printer thread
 
     // close the LL mutex
-    pthread_mutex_destroy(board.delListMutex);
+    pthread_mutex_destroy(&board.carListMutex);
 
     // close all the board mutex
     for (int i = 0;i < N;i++) {
         for (int j = 0;j < N; j++) {
-            pthread_mutex_destroy(board.mutexBoard[i][j]);
+            pthread_mutex_destroy(&board.mutexBoard[i][j]);
         }
     }
 
@@ -281,12 +273,12 @@ void carEntity(void* args) {
         usleep(INTER_MOVES_IN_NS / (double)1000);
         if (on_corner(carPtr->location) && carPtr->location.just_born == 0 && (rand() % 100 < FIN_PROB * 100)) {
             // remove car
-            safe_mutex_lock(carPtr, board.delListMutex);
+            safe_mutex_lock(carPtr, board.carListMutex);
             // delete yourself from the doubly_linked_list
             delete_self(carPtr);
             pthread_exit(NULL);
             // 
-            pthread_mutex_unlock(board.delListMutex);
+            pthread_mutex_unlock(board.carListMutex);
         }
         else {
             // move car
