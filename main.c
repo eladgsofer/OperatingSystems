@@ -53,7 +53,11 @@ void initBoard();
 void printBoard();
 void generateCar(void* carGen);
 void initCarAgent(carGenerator* carGen, int agentId);
+void carEntity(void* args);
 Cell get_next_position(Cell curr_pos);
+void closeSystem();
+int safe_mutex_lock(CarNode* me, pthread_mutex_t* mutex);
+void delete_self(CarNode* me);
 
 pthread_t agents[4];
 pthread_t cars[4 * N];
@@ -197,7 +201,7 @@ void generateCar(void* carGen)
         pthread_mutex_lock(&board.mutexBoard[carGenObj->prevCell.x][carGenObj->prevCell.y]);
         //if(delCarList->)
 
-        if(pthread_create(& temp ->carThread, NULL, driveCar, newCar)){
+        if(pthread_create(& temp ->carThread, NULL, carEntity, newCar)){
             perror("Error in creating!\n");
             freeAll(EXIT_FAILURE);
         }
