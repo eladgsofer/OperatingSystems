@@ -197,7 +197,7 @@ _Noreturn void generateCar(void* carGen)
         pthread_mutex_lock(&board.mutexBoard[carGenObj->curCell.x][carGenObj->curCell.y]);
         pthread_mutex_lock(&board.mutexBoard[carGenObj->prevCell.x][carGenObj->prevCell.y]);
 
-        if(pthread_create(& temp ->carThread, NULL, carEntity, newCar)){
+        if(pthread_create(&(newCar ->carThread), NULL, carEntity, newCar)){
             perror("Error in creating!\n");
             closeSystem(EXIT_FAILURE);
         }
@@ -322,6 +322,7 @@ Cell get_next_position(Cell curr_pos) {
         new_loc.x = curr_pos.x - 1;
         new_loc.y = curr_pos.y;
     }
+    return new_loc;
 }
 
 // check if you are on a sink/generator square(on the corners)
