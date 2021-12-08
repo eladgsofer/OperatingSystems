@@ -18,14 +18,19 @@
 // scheduler is aware of mutex...
 // double matrix of [][] mutexes..
 
+
 pthread_mutex_t mutexBoard[N][N];
 char charsBoard[N][N];
+
 pthread_t agents[4];
 pthread_t cars[4*N];
-
+typedef struct car_position{
+	int x;
+	int y;
+} car_pos;
 int main() {
-
-
+	initBoard();
+	printBoard();
 
     return 0;
 }
@@ -44,7 +49,7 @@ void initBoard(){
     for (i=0;i<N;i++)
         for (j=0;j<N;j++)
         {
-            if (i==0 || j==0)
+            if (i==0 || j==0 || i==N-1||j==N-1)
                 charsBoard[i][j] = ' ';
             else
                 charsBoard[i][j] = '@';
@@ -80,27 +85,56 @@ void startAgent(int agentId)
         switch (agentId) {
 
             case 1:
-                pthread_mutex_lock(&board_locks[0][N-1]);
-                pthread_mutex_lock(&board_locks[1][N-1]);
+                pthread_mutex_lock(&mutexBoard[0][N-1]);
+                pthread_mutex_lock(&mutexBoard[1][N-1]);
                 //if (!board[0][N-1] && !board[1][N-1])
                     //pthread_create(carEntity)
 
-                pthread_mutex_unlock(&board_locks[0][N-1]);
-                pthread_mutex_unlock(&board_locks[1][N-1]);
+                pthread_mutex_unlock(&mutexBoard[0][N-1]);
+                pthread_mutex_unlock(&mutexBoard[1][N-1]);
                 break;
 
         }
     }
 }
 
-void carEntity(startX, startY){
+void printBoard(){
+	for (int i = 0;i<N; i++) {
+		for (int j=0;j<N;j++) {
+			printf("%c",charsBoard[i][j]);
+		}
+		printf("\n");
+	}
+}
+
+//    0  1  2  ... N-2 N-1
+//0   X                X
+//1      @  @  ...  @
+//2      @  @  ...  @ 
+//.      .  .  
+//N-2    @  @       @
+//N-1 X                X
+//
+void carEntity(car_pos loc){
     while (1)
     {
-
+	
     }
 
 }
-
+car_pos get_next_position(car_pos curr_pos){
+//	car_pos new_loc;
+//	if (loc.x == 0 && loc.y>0){
+//	 	// we are in the top row and moving left
+//	 	new_loc.
+//	}
+//	else if (loc.x == N-1){
+//		// we are in the bottom row
+//	}
+//	if (loc.y == 0 || loc.y == N-1){
+	
+	//}
+}
 void producer(){
     printf("Hello producer id:%d", pthread_self());
 }
