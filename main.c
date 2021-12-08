@@ -58,12 +58,10 @@ Cell get_next_position(Cell curr_pos);
 void closeSystem();
 int safe_mutex_lock(CarNode* me, pthread_mutex_t* mutex);
 void delete_self(CarNode* me);
-
-pthread_t agents[4];
-pthread_t cars[4 * N];
-
+int on_corner(Cell curr_pos);
 
 Board board;
+pthread_t boardPrinter;
 carGenerator carAgents[4];
 
 void initCarAgent(carGenerator* carGen, int agentId){
@@ -114,7 +112,7 @@ int main() {
 
     // boardPrinter & carGenerators Threads
 
-    pthread_t boardPrinter;
+
 
     // Create Station threads
     for(i=0;i<=3;i++){
@@ -202,7 +200,7 @@ void generateCar(void* carGen)
 
         if(pthread_create(& temp ->carThread, NULL, carEntity, newCar)){
             perror("Error in creating!\n");
-            freeAll(EXIT_FAILURE);
+            closeSystem(EXIT_FAILURE);
         }
 
         pthread_mutex_unlock(&board.mutexBoard[carGenObj->curCell.x][carGenObj->curCell.y]);
@@ -240,22 +238,20 @@ pthread_mutex_unlock();*/
 //N-1 X                X
 //
 void closeSystem(int returnCode) {
-    Node* tempNode;
+    CarNode* tempNode;
 
     // close the generating agents
     for (int i = 0;i < 4;i++) {
         pthread_cancel(carAgents[i].genThread);
     }
     // close all the cars(threads and memory)
-    while (board.doublyLL != NULL) {
-        tempNode = board.doublyLL;
-        board.doublyLL = tempNode->nextCar;
+    while (board.carList != NULL) {
+        tempNode = board.carList;
+        board.carList = tempNode->nextCar;
 
         pthread_cancel(tempNode->carThread);
         free(tempNode);
     }
-    pthread_cancel(board.printThread); // TODO: change this to printer thread
-
     // close the LL mutex
     pthread_mutex_destroy(&board.carListMutex);
 
@@ -265,23 +261,24 @@ void closeSystem(int returnCode) {
             pthread_mutex_destroy(&board.mutexBoard[i][j]);
         }
     }
+    pthread_cancel(boardPrinter);
     exit(returnCode);
 }
 void carEntity(void* args) {
     int sleepTime;
-    Node* carPtr = args;
+    CarNode* carPtr = args;
     Cell next_pos;
     while (1)
     {
         usleep(INTER_MOVES_IN_NS / (double)1000);
-        if (on_corner(carPtr->location) && carPtr->location.just_born == 0 && (rand() % 100 < FIN_PROB * 100)) {
+        if (on_corner(carPtr->location) && carPtr->justBorn == 0 && (rand() % 100 < FIN_PROB * 100)) {
             // remove car
-            safe_mutex_lock(carPtr, board.carListMutex);
+            safe_mutex_lock(carPtr, &board.carListMutex);
             // delete yourself from the doubly_linked_list
             delete_self(carPtr);
             pthread_exit(NULL);
             // 
-            pthread_mutex_unlock(board.carListMutex);
+            pthread_mutex_unlock(&board.carListMutex);
         }
         else {
             // move car
@@ -289,12 +286,12 @@ void carEntity(void* args) {
 
             // this code is a deadlock potential code since we first lock and then unlock but it is neccessary to insure that a car doesn't lose it's spot
             // the deadlock will not happen only because the generator insures there will never be too many cars in the circle(by adding a new car only if there are two open slots)
-            safe_mutex_lock(carPtr, board.mutexBoard[next_pos.x][next_pos.y]); // lock the next position
-            pthread_mutex_unlock(board.mutexBoard[carPtr->location.x][carPtr->location.y]);         // unlock the current position
+            safe_mutex_lock(carPtr, &board.mutexBoard[next_pos.x][next_pos.y]); // lock the next position
+            pthread_mutex_unlock(&board.mutexBoard[carPtr->location.x][carPtr->location.y]);         // unlock the current position
 
             carPtr->location = next_pos;
             if (on_corner(carPtr->location)) {
-                carPtr->location.just_born = 0;
+                carPtr->justBorn = 0;
             }
         }
     }
@@ -302,7 +299,7 @@ void carEntity(void* args) {
 }
 
 
-int safe_mutex_lock(Node* me, pthread_mutex_t* mutex) {
+int safe_mutex_lock(CarNode* me, pthread_mutex_t* mutex) {
     int returnValue;
     returnValue = pthread_mutex_lock(mutex);
     if (returnValue == 0) {
@@ -316,10 +313,10 @@ int safe_mutex_lock(Node* me, pthread_mutex_t* mutex) {
     return -1;
 }
 
-void delete_self(Node* me) {
+void delete_self(CarNode* me) {
     if (me->prevCar == NULL) { // we are the first car
         pthread_mutex_lock(&board.carListMutex);   // if this failes we have have nothing we can do.
-        board.doublyLL = me->nextCar;
+        board.carList = me->nextCar;
         me->nextCar->prevCar = NULL;
         pthread_mutex_unlock(&board.carListMutex);
     }
