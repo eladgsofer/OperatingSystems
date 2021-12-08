@@ -21,6 +21,8 @@
 void initBoard();
 void printBoard();
 
+int run_failed;
+
 typedef struct Car{
     int x, y;
     int justBorn;
@@ -61,6 +63,7 @@ int main() {
 
     int i, id[4] = {0,1,2,3}; //Station ids
     
+    run_failed = 0;
     // boardPrinter & carGenerators Threads
     pthread_t boardPrinter, carGenerators[4];
 	initBoard();
@@ -176,60 +179,94 @@ pthread_mutex_unlock();*/
 //N-2    @  @       @
 //N-1 X                X
 //
-void carEntity(car_pos loc){
+void carEntity(void* args){
 	int sleepTime;
-	car_pos next_pos;
+	Node *carPtr = args;
+	Cell next_pos;
     	while (1)
     	{
 		usleep(INTER_MOVES_IN_NS / (double)1000);
-		if (on_corner(loc) && loc.just_born==0 && (rand() % 100 < FIN_PROB * 100)) {
+		if (on_corner(carPtr->location) && carPtr->location.just_born==0 && (rand() % 100 < FIN_PROB * 100)) {
 			// remove car
+			safe_mutex_lock(carPtr, board.delListMutex);
+			// delete yourself from the doubly_linked_list
+			delete_self(me);
+			pthread_exit(NULL);
+			// 
+			pthread_mutex_unlock(board.delListMutex);
 		} else {
 			// move car
-			next_pos = get_next_position(loc);
+			next_pos = get_next_position(carPtr->location);
 			
 			// this code is a deadlock potential code since we first lock and then unlock but it is neccessary to insure that a car doesn't lose it's spot
 			// the deadlock will not happen only because the generator insures there will never be too many cars in the circle(by adding a new car only if there are two open slots)
-			pthread_mutex_lock(mutexBoard[next_pos.x][next_pos.y]); // lock the next position
-			pthread_mutex_unlock(mutexBoard[loc.x][loc.y]);         // unlock the current position
+			safe_mutex_lock(carPtr, board.mutexBoard[next_pos.x][next_pos.y]); // lock the next position
+			pthread_mutex_unlock(board.mutexBoard[loc.x][loc.y]);         // unlock the current position
 			
-			loc = next_pos;
-
-			if (on_corner(loc)){
-				loc.just_born = 0;
+			carPtr->location = next_pos;
+			if (on_corner(carPtr->location)){
+				carPtr->location.just_born = 0;
 			}
-			
 		}
     	}
 
 }
 
-car_pos get_next_position(car_pos curr_pos){
-	car_pos new_loc;
-	new_loc.just_born = curr_pos.just_born;
-	if (loc.x == 0 && loc.y>0){
+
+int safe_mutex_lock(Node* me, pthread_mutex_t* mutex){
+	int returnValue;
+	returnValue = pthread_mutex_lock(mutex);
+	if (returnValue == 0) {
+		return 0;
+	}
+	
+	// if we reached here then the lock failed
+	run_failed = 1;
+	delete_self(me);
+	pthread_exit(NULL);
+	return -1;
+}
+
+void delete_self(Node* me){
+	if (me->prevCar == NULL){ // we are the first car
+		pthread_mutex_lock(board.delListMutex);   // if this failes we have have nothing we can do.
+		board.doublyLL = me->nextCar;
+		me->nextCar->prevCar = NULL;
+		pthread_mutex_unlock(board.delListMutex);
+	} else { // we are in the middle
+		pthread_mutex_lock(board.delListMutex);   // if this failes we have have nothing we can do.
+		me->prevCar->nextCar = me->nextCar;
+		me->nextCar->prevCar = me->prevCar;
+		pthread_mutex_unlock(board.delListMutex);
+	}
+	free(me);
+
+}
+car_pos get_next_position(Cell curr_pos){
+	Cell new_loc;
+	if (curr_pos.x == 0 && curr_pos.y>0){
 	 	// we are in the top row and moving left
-	 	new_loc.x = loc.x;
-	 	new_loc.y = loc.y-1;
+	 	new_loc.x = curr_pos.x;
+	 	new_loc.y = curr_pos.y-1;
 	}
-	else if (loc.x == N-1 && loc.y<N-1){
+	else if (curr_pos.x == N-1 && curr_pos.y<N-1){
 		// we are in the bottom row and moving right
-		new_loc.x = loc.x;
-	 	new_loc.y = loc.y+1;
+		new_loc.x = curr_pos.x;
+	 	new_loc.y = curr_pos.y+1;
 	}
-	else if (loc.y == 0 || loc.x < N-1){
+	else if (curr_pos.y == 0 || curr_pos.x < N-1){
 		// we are in the left column and moving down
-		new_loc.x = loc.x+1;
-		new_loc.y = loc.y;
+		new_loc.x = curr_pos.x+1;
+		new_loc.y = curr_pos.y;
 	} else {
 		// we are in the right column and moving up
-		new_loc.x = loc.x-1;
-		new_loc.y = loc.y;
+		new_loc.x = curr_pos.x-1;
+		new_loc.y = curr_pos.y;
 	}
 }
 
 // check if you are on a sink/generator square(on the corners)
-int on_corner(car_pos curr_pos){
+int on_corner(Cell curr_pos){
 	return ((curr_pos.x == 0 || curr_pos.x == N-1) && (curr_pos.y == 0 || curr_pos.y == N-1));
 }
 void producer(){
