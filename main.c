@@ -27,6 +27,7 @@ pthread_t cars[4*N];
 typedef struct car_position{
 	int x;
 	int y;
+	int just_born;
 } car_pos;
 int main() {
 	initBoard();
@@ -116,24 +117,60 @@ void printBoard(){
 //N-1 X                X
 //
 void carEntity(car_pos loc){
-    while (1)
-    {
-	
-    }
+	int sleepTime;
+	car_pos next_pos;
+    	while (1)
+    	{
+		usleep(INTER_MOVES_IN_NS / (double)1000);
+		if (on_corner(loc) && loc.just_born==0 && (rand() % 100 < FIN_PROB * 100)) {
+			// remove car
+		} else {
+			// move car
+			next_pos = get_next_position(loc);
+			
+			// this code is a deadlock potential code since we first lock and then unlock but it is neccessary to insure that a car doesn't lose it's spot
+			// the deadlock will not happen only because the generator insures there will never be too many cars in the circle(by adding a new car only if there are two open slots)
+			pthread_mutex_lock(mutexBoard[next_pos.x][next_pos.y]); // lock the next position
+			pthread_mutex_unlock(mutexBoard[loc.x][loc.y]);         // unlock the current position
+			
+			loc = next_pos;
+
+			if (on_corner(loc)){
+				loc.just_born = 0;
+			}
+			
+		}
+    	}
 
 }
+
 car_pos get_next_position(car_pos curr_pos){
-//	car_pos new_loc;
-//	if (loc.x == 0 && loc.y>0){
-//	 	// we are in the top row and moving left
-//	 	new_loc.
-//	}
-//	else if (loc.x == N-1){
-//		// we are in the bottom row
-//	}
-//	if (loc.y == 0 || loc.y == N-1){
-	
-	//}
+	car_pos new_loc;
+	new_loc.just_born = curr_pos.just_born;
+	if (loc.x == 0 && loc.y>0){
+	 	// we are in the top row and moving left
+	 	new_loc.x = loc.x;
+	 	new_loc.y = loc.y-1;
+	}
+	else if (loc.x == N-1 && loc.y<N-1){
+		// we are in the bottom row and moving right
+		new_loc.x = loc.x;
+	 	new_loc.y = loc.y+1;
+	}
+	else if (loc.y == 0 || loc.x < N-1){
+		// we are in the left column and moving down
+		new_loc.x = loc.x+1;
+		new_loc.y = loc.y;
+	} else {
+		// we are in the right column and moving up
+		new_loc.x = loc.x-1;
+		new_loc.y = loc.y;
+	}
+}
+
+// check if you are on a sink/generator square(on the corners)
+int on_corner(car_pos curr_pos){
+	return ((curr_pos.x == 0 || curr_pos.x == N-1) && (curr_pos.y == 0 || curr_pos.y == N-1));
 }
 void producer(){
     printf("Hello producer id:%d", pthread_self());
