@@ -18,32 +18,42 @@
 
 // scheduler is aware of mutex...
 // double matrix of [][] mutexes..
-void initBoard();
-void printBoard();
 
 int run_failed;
 
-typedef struct Car {
-    int x, y;
-    int justBorn;
-} Car;
+typedef struct Cell{
+    int x;
+    int y;
+} Cell;
 
 // LinkedList
-typedef struct Node {
-    struct Node* nextDelCar;
-    struct Node* prevCar;
-} Node;
+typedef struct CarNode{
 
-typedef struct Cell {
-    int i;
-    int j;
-} Cell;
-typedef struct Board {
+    int justBorn;
+    pthread_t carThread;
+    struct CarNode* nextCar;
+    struct CarNode* prevCar;
+    struct Cell location;
+} CarNode;
+
+typedef struct carGenerator{
+    pthread_t genThread;
+    int agentId;
+    Cell curCell, prevCell;
+} carGenerator;
+
+typedef struct Board{
     char charsBoard[N][N];
     pthread_mutex_t mutexBoard[N][N];
-    pthread_mutex_t delListMutex;
+    pthread_mutex_t carListMutex;
+    CarNode* carList;
 } Board;
 
+void initBoard();
+void printBoard();
+void generateCar(void* carGen);
+void initCarAgent(carGenerator* carGen, int agentId);
+Cell get_next_position(Cell curr_pos);
 
 pthread_t agents[4];
 pthread_t cars[4 * N];
@@ -57,26 +67,63 @@ typedef struct car_position {
 Board board;
 
 
+Board board;
+
+
+void initCarAgent(carGenerator* carGen, int agentId){
+    carGen->agentId = agentId;
+
+    switch (agentId) {
+        case 1:
+            carGen->curCell.x =  N-1;
+            carGen->curCell.y = 0;
+            carGen->prevCell.x = N-1;
+            carGen->prevCell.y = 1;
+            break;
+        case 2:
+            carGen->curCell.x =  0;
+            carGen->curCell.y = 0;
+            carGen->prevCell.x = 1;
+            carGen->prevCell.y = 1;
+            break;
+        case 3:
+            carGen->curCell.x =  0;
+            carGen->curCell.y = N-1;
+            carGen->prevCell.x = N-2;
+            carGen->prevCell.y = 0;
+            break;
+        case 4:
+            carGen->curCell.x =  N-1;
+            carGen->curCell.y = N-1;
+            carGen->prevCell.x = N-2;
+            carGen->prevCell.y = N-1;
+            break;
+        default:
+            break;
+    }
+
+    if(pthread_create(carGen->genThread, NULL, generateCar, (void*)carGen)){
+        perror("Error in creating station threads!\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
 int main() {
     time_t t;
-    srand((unsigned)time(&t));
+    board.carList = NULL;
 
-    int i, id[4] = { 0,1,2,3 }; //Station ids
-
-    run_failed = 0;
-    // boardPrinter & carGenerators Threads
-    pthread_t boardPrinter, carGenerators[4];
+    int i, id[4] = {0,1,2,3}; //Station ids
+    srand((unsigned) time(&t));
     initBoard();
 
-    // Create Station threads
-    for (i = 0;i <= 3;i++) {
-        switch (i) {
+    // boardPrinter & carGenerators Threads
+    carGenerator carAgents[4];
+    pthread_t boardPrinter;
 
-        }
-        if (pthread_create(carGenerators[i], NULL, generateCar, id + i)) {
-            perror("Error in creating station threads!\n");
-            exit(EXIT_FAILURE);
-        }
+    // Create Station threads
+    for(i=0;i<=3;i++){
+        // create the Car Generators
+        initCarAgent(&carAgents[i],i);
     }
 
     // Create printer thread
@@ -103,7 +150,6 @@ void initBoard() {
             else
                 board.charsBoard[i][j] = '@';
         }
-
     // Initialize Mutex rows & columns
     for (i = 0;i < N;i += N - 1)
         for (j = 0;j < N;j++)
@@ -113,7 +159,8 @@ void initBoard() {
             }
 
     // Initialize LinkedList deletion mutex
-    if (pthread_mutex_init(&board.delListMutex, NULL)) {
+
+    if (pthread_mutex_init(&board.carListMutex, NULL)){
         perror("Error in initializing panel mutex!\n");
         exit(EXIT_FAILURE);
     }
@@ -133,26 +180,44 @@ void printBoard() {
     }
 }
 
-void generateCar(int agentId, Cell prevCell, Cell currCell)
+void generateCar(void* carGen)
 {
-
     int rand_interval;
-    while (1) {
+
+    carGenerator* carGenObj = (carGenerator*)carGen;
+
+    while (1){
         rand_interval = (rand() % (MAX_INTER_ARRIVAL_IN_NS - MIN_INTER_ARRIVAL_IN_NS + 1)) + MIN_INTER_ARRIVAL_IN_NS;
         sleep(rand_interval);
         // generate a car in the board
 
-        pthread_mutex_lock(&mutexBoard[0][N - 1]);
-        pthread_mutex_lock(&mutexBoard[1][N - 1]);
-        //if (!board[0][N-1] && !board[1][N-1])
-            //pthread_create(carEntity)
+        CarNode* newCar = (struct CarNode*)malloc(sizeof(CarNode));
+        newCar -> justBorn = 1;
+        newCar ->location = carGenObj->curCell;
+        newCar ->prevCar = NULL;
 
-        pthread_mutex_unlock(&mutexBoard[0][N - 1]);
-        pthread_mutex_unlock(&mutexBoard[1][N - 1]);
+        CarNode* temp = board.carList;
+
+        board.carList = newCar;
+        board.carList->nextCar = temp;
+
+        pthread_mutex_lock(&board.mutexBoard[carGenObj->curCell.x][carGenObj->curCell.y]);
+        pthread_mutex_lock(&board.mutexBoard[carGenObj->prevCell.x][carGenObj->prevCell.y]);
+        //if(delCarList->)
+
+        if(pthread_create(& temp ->carThread, NULL, driveCar, newCar)){
+            perror("Error in creating!\n");
+            freeAll(EXIT_FAILURE);
+        }
+
+        pthread_mutex_unlock(&board.mutexBoard[carGenObj->curCell.x][carGenObj->curCell.y]);
+        pthread_mutex_unlock(&board.mutexBoard[carGenObj->prevCell.x][carGenObj->prevCell.y]);
+
 
 
     }
 }
+
 
 //gcc t91.c -l pthread
 /*
@@ -258,19 +323,20 @@ int safe_mutex_lock(Node* me, pthread_mutex_t* mutex) {
 
 void delete_self(Node* me) {
     if (me->prevCar == NULL) { // we are the first car
-        pthread_mutex_lock(board.delListMutex);   // if this failes we have have nothing we can do.
+        pthread_mutex_lock(&board.carListMutex);   // if this failes we have have nothing we can do.
         board.doublyLL = me->nextCar;
         me->nextCar->prevCar = NULL;
-        pthread_mutex_unlock(board.delListMutex);
+        pthread_mutex_unlock(&board.carListMutex);
     }
     else { // we are in the middle
-        pthread_mutex_lock(board.delListMutex);   // if this failes we have have nothing we can do.
+        pthread_mutex_lock(&board.carListMutex);   // if this failes we have have nothing we can do.
         me->prevCar->nextCar = me->nextCar;
         me->nextCar->prevCar = me->prevCar;
-        pthread_mutex_unlock(board.delListMutex);
+        pthread_mutex_unlock(&board.carListMutex);
     }
     free(me);
 }
+
 Cell get_next_position(Cell curr_pos) {
     Cell new_loc;
     if (curr_pos.x == 0 && curr_pos.y > 0) {
