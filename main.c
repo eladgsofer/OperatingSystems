@@ -50,8 +50,10 @@ typedef struct Board{
 } Board;
 
 void initBoard();
-void printBoard();
-void generateCar(void* carGen);
+
+_Noreturn void printBoard();
+
+_Noreturn void generateCar(void* carGen);
 void initCarAgent(carGenerator* carGen, int agentId);
 void carEntity(void* args);
 Cell get_next_position(Cell curr_pos);
@@ -96,7 +98,7 @@ void initCarAgent(carGenerator* carGen, int agentId){
             break;
     }
 
-    if(pthread_create(carGen->genThread, NULL, generateCar, (void*)carGen)){
+    if(pthread_create(&carGen->genThread, NULL, generateCar, (void*)carGen)){
         perror("Error in creating station threads!\n");
         exit(EXIT_FAILURE);
     }
@@ -110,25 +112,21 @@ int main() {
     srand((unsigned) time(&t));
     initBoard();
 
-    // boardPrinter & carGenerators Threads
-
-
-
     // Create Station threads
-    for(i=0;i<=3;i++){
+    for(i=1;i<=4;i++){
         // create the Car Generators
         initCarAgent(&carAgents[i],i);
     }
 
     // Create printer thread
-    if (pthread_create(boardPrinter, NULL, printBoard, NULL)) {
+    if (pthread_create(&boardPrinter, NULL, printBoard, NULL)) {
         perror("Error in creating printer thread!\n");
         exit(EXIT_FAILURE);
     }
 
     sleep(SIM_TIME);
 
-    //freeAll(EXIT_SUCCESS);
+    closeSystem(EXIT_SUCCESS);
 
     return 0;
 }
@@ -160,7 +158,7 @@ void initBoard() {
     }
 }
 
-void printBoard() {
+_Noreturn void printBoard() {
     while (1) {
 
         usleep((SIM_TIME / (double)(1 + BOARD_PRINTS)) * 1000000); // Convert [sec] to [usec]
@@ -174,7 +172,7 @@ void printBoard() {
     }
 }
 
-void generateCar(void* carGen)
+_Noreturn void generateCar(void* carGen)
 {
     int rand_interval;
 
