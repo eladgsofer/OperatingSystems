@@ -199,7 +199,6 @@ void generateCar(void* carGen)
 
         pthread_mutex_lock(&board.mutexBoard[carGenObj->curCell.x][carGenObj->curCell.y]);
         pthread_mutex_lock(&board.mutexBoard[carGenObj->prevCell.x][carGenObj->prevCell.y]);
-        //if(delCarList->)
 
         if(pthread_create(& temp ->carThread, NULL, carEntity, newCar)){
             perror("Error in creating!\n");
@@ -240,7 +239,7 @@ pthread_mutex_unlock();*/
 //N-2    @  @       @
 //N-1 X                X
 //
-void closeSystem() {
+void closeSystem(int returnCode) {
     Node* tempNode;
 
     // close the generating agents
@@ -266,7 +265,7 @@ void closeSystem() {
             pthread_mutex_destroy(&board.mutexBoard[i][j]);
         }
     }
-
+    exit(returnCode);
 }
 void carEntity(void* args) {
     int sleepTime;
