@@ -7,22 +7,17 @@
 #include <unistd.h>
 
 #define N 5
-#define FIN_PROB 0.5
-//#define MIN_INTER_ARRIVAL_IN_NS 8000000
-#define MIN_INTER_ARRIVAL_IN_NS 800000000
-//#define MAX_INTER_ARRIVAL_IN_NS 9000000
-#define MAX_INTER_ARRIVAL_IN_NS 900000000
-#define INTER_MOVES_IN_NS		100000000
-#define SIM_TIME 20
-// #define SIM_TIME 2
+#define FIN_PROB 0.1
+#define MIN_INTER_ARRIVAL_IN_NS 8000000
+#define MAX_INTER_ARRIVAL_IN_NS 9000000
+#define INTER_MOVES_IN_NS		100000
+#define SIM_TIME 2
 #define BOARD_PRINTS 10
-#define AGENTS 4
-#define CARS
-
-// scheduler is aware of mutex...
-// double matrix of [][] mutexes..
-
-int run_failed;
+#define SPACE_MARK				' '		// The character that represents a blank (in print)
+#define CAR_MARK			'*'		// The character that represents a car (in print)
+#define CENTER_MARK			'@'		// The character that represents the circle (in print)
+#define TRUE				1
+#define FALSE				0
 
 typedef struct Cell{
     int i;
@@ -37,7 +32,6 @@ typedef struct CarNode{
     struct CarNode* nextCar;
     struct CarNode* prevCar;
     struct Cell location;
-    char debug;
 } CarNode;
 
 typedef struct carGenerator{
@@ -118,6 +112,7 @@ int main() {
     // Create Station threads
     for(i=1;i<=4;i++){
         // create the Car Generators
+
         initCarAgent(&carAgents[i],i);
     }
 
@@ -141,9 +136,9 @@ void initBoard() {
         for (j = 0;j < N;j++)
         {
             if (i == 0 || j == 0 || i == N - 1 || j == N - 1)
-                board.charsBoard[i][j] = ' ';
+                board.charsBoard[i][j] = SPACE_MARK;
             else
-                board.charsBoard[i][j] = '@';
+                board.charsBoard[i][j] = CENTER_MARK;
         }
     // Initialize Mutex rows & columns
     for (i = 0;i < N;i += N - 1)
@@ -198,8 +193,7 @@ _Noreturn void generateCar(void* carGen)
         // generate a car in the board
 
         CarNode* newCar = (struct CarNode*)malloc(sizeof(CarNode));
-        newCar -> justBorn = 1;
-        newCar->debug = 'G';
+        newCar -> justBorn = TRUE;
         newCar ->location = carGenObj->curCell;
         newCar ->prevCar = NULL;
 
@@ -255,12 +249,12 @@ void carEntity(void* args) {
     int sleepTime;
     CarNode* carPtr = args;
     Cell next_pos;
-    board.charsBoard[carPtr->location.i][carPtr->location.j] = '*';
+    board.charsBoard[carPtr->location.i][carPtr->location.j] = CAR_MARK;
     //print_action();
     while (1)
     {
         usleep(INTER_MOVES_IN_NS / (double)1000);
-        if (on_corner(carPtr->location) && carPtr->justBorn == 0 && (rand() % 100 < FIN_PROB * 100)) {
+        if (on_corner(carPtr->location) && carPtr->justBorn == FALSE && (rand() % 100 < FIN_PROB * 100)) {
             // delete yourself from the doubly_linked_list
             delete_self(carPtr);
             pthread_exit(NULL);
@@ -278,13 +272,13 @@ void carEntity(void* args) {
 
             safe_mutex_lock(carPtr, &board.mutexBoard[next_pos.i][next_pos.j]); // lock the next position
             board.charsBoard[carPtr->location.i][carPtr->location.j] = ' ';
-            board.charsBoard[next_pos.i][next_pos.j] = '*';
+            board.charsBoard[next_pos.i][next_pos.j] = CAR_MARK;
 
             pthread_mutex_unlock(&board.mutexBoard[carPtr->location.i][carPtr->location.j]);         // unlock the current position
             //print_action();
             carPtr->location = next_pos;
             if (on_corner(carPtr->location)) {
-                carPtr->justBorn = 0;
+                carPtr->justBorn = FALSE;
             }
         }
 
@@ -301,7 +295,6 @@ int safe_mutex_lock(CarNode* me, pthread_mutex_t* mutex) {
     }
 
     // if we reached here then the lock failed
-    run_failed = 1;
     delete_self(me);
     pthread_exit(NULL);
 
@@ -310,12 +303,11 @@ int safe_mutex_lock(CarNode* me, pthread_mutex_t* mutex) {
 void delete_self(CarNode* me) {
 
     pthread_mutex_lock(&board.carListMutex);   // if this failes we have have nothing we can do.
-    me->debug = 'F';
     board.charsBoard[me->location.i][me->location.j] = ' ';
 
     pthread_mutex_unlock(&board.mutexBoard[me->location.i][me->location.j]);         // unlock the current position
 
-    printf("FREE %d, %d THREAD %d\n",  me->location.i, me->location.j, pthread_self());
+    //printf("FREE %d, %d THREAD %d\n",  me->location.i, me->location.j, pthread_self());
     if (me->nextCar==NULL && me->prevCar == NULL){
         board.carList = NULL;
     }
