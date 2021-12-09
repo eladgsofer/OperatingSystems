@@ -7,11 +7,14 @@
 #include <unistd.h>
 
 #define N 5
-#define FIN_PROB 0.1
-#define MIN_INTER_ARRIVAL_IN_NS 8000000
-#define MAX_INTER_ARRIVAL_IN_NS 9000000
-#define INTER_MOVES_IN_NS		100000
-#define SIM_TIME 2
+#define FIN_PROB 0.5
+//#define MIN_INTER_ARRIVAL_IN_NS 8000000
+#define MIN_INTER_ARRIVAL_IN_NS 800000000
+//#define MAX_INTER_ARRIVAL_IN_NS 9000000
+#define MAX_INTER_ARRIVAL_IN_NS 900000000
+#define INTER_MOVES_IN_NS		100000000
+#define SIM_TIME 20
+// #define SIM_TIME 2
 #define BOARD_PRINTS 10
 #define AGENTS 4
 #define CARS
@@ -22,8 +25,8 @@
 int run_failed;
 
 typedef struct Cell{
-    int x;
-    int y;
+    int i;
+    int j;
 } Cell;
 
 // LinkedList
@@ -34,6 +37,7 @@ typedef struct CarNode{
     struct CarNode* nextCar;
     struct CarNode* prevCar;
     struct Cell location;
+    char debug;
 } CarNode;
 
 typedef struct carGenerator{
@@ -70,28 +74,28 @@ void initCarAgent(carGenerator* carGen, int agentId){
 
     switch (agentId) {
         case 1:
-            carGen->curCell.x =  N-1;
-            carGen->curCell.y = 0;
-            carGen->prevCell.x = N-1;
-            carGen->prevCell.y = 1;
+            carGen->curCell.i = N - 1;
+            carGen->curCell.j = 0;
+            carGen->prevCell.i = N - 1;
+            carGen->prevCell.j = 1;
             break;
         case 2:
-            carGen->curCell.x =  0;
-            carGen->curCell.y = 0;
-            carGen->prevCell.x = 1;
-            carGen->prevCell.y = 1;
+            carGen->curCell.i =  0;
+            carGen->curCell.j = 0;
+            carGen->prevCell.i = 1;
+            carGen->prevCell.j = 1;
             break;
         case 3:
-            carGen->curCell.x =  0;
-            carGen->curCell.y = N-1;
-            carGen->prevCell.x = N-2;
-            carGen->prevCell.y = 0;
+            carGen->curCell.i =  0;
+            carGen->curCell.j = N - 1;
+            carGen->prevCell.i = N - 2;
+            carGen->prevCell.j = 0;
             break;
         case 4:
-            carGen->curCell.x =  N-1;
-            carGen->curCell.y = N-1;
-            carGen->prevCell.x = N-2;
-            carGen->prevCell.y = N-1;
+            carGen->curCell.i = N - 1;
+            carGen->curCell.j = N - 1;
+            carGen->prevCell.i = N - 2;
+            carGen->prevCell.j = N - 1;
             break;
         default:
             break;
@@ -171,6 +175,15 @@ _Noreturn void printBoard() {
         printf("\n");
     }
 }
+void print_action(){
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            printf("%c", board.charsBoard[i][j]);
+        }
+        printf("\n");
+    }
+    printf("\n");
+}
 
 _Noreturn void generateCar(void* carGen)
 {
@@ -186,6 +199,7 @@ _Noreturn void generateCar(void* carGen)
 
         CarNode* newCar = (struct CarNode*)malloc(sizeof(CarNode));
         newCar -> justBorn = 1;
+        newCar->debug = 'G';
         newCar ->location = carGenObj->curCell;
         newCar ->prevCar = NULL;
 
@@ -194,16 +208,16 @@ _Noreturn void generateCar(void* carGen)
         board.carList = newCar;
         board.carList->nextCar = temp;
 
-        pthread_mutex_lock(&board.mutexBoard[carGenObj->curCell.x][carGenObj->curCell.y]);
-        pthread_mutex_lock(&board.mutexBoard[carGenObj->prevCell.x][carGenObj->prevCell.y]);
+        pthread_mutex_lock(&board.mutexBoard[carGenObj->curCell.i][carGenObj->curCell.j]);
+        pthread_mutex_lock(&board.mutexBoard[carGenObj->prevCell.i][carGenObj->prevCell.j]);
 
         if(pthread_create(&(newCar ->carThread), NULL, carEntity, newCar)){
             perror("Error in creating!\n");
             closeSystem(EXIT_FAILURE);
         }
 
-        pthread_mutex_unlock(&board.mutexBoard[carGenObj->curCell.x][carGenObj->curCell.y]);
-        pthread_mutex_unlock(&board.mutexBoard[carGenObj->prevCell.x][carGenObj->prevCell.y]);
+        // pthread_mutex_unlock(&board.mutexBoard[carGenObj->curCell.i][carGenObj->curCell.j]);
+        pthread_mutex_unlock(&board.mutexBoard[carGenObj->prevCell.i][carGenObj->prevCell.j]);
 
     }
 }
@@ -221,10 +235,12 @@ void closeSystem(int returnCode) {
         board.carList = tempNode->nextCar;
 
         pthread_cancel(tempNode->carThread);
+
         free(tempNode);
     }
     // close the LL mutex
     pthread_mutex_destroy(&board.carListMutex);
+
 
     // close all the board mutex
     for (int i = 0;i < N;i++) {
@@ -239,12 +255,12 @@ void carEntity(void* args) {
     int sleepTime;
     CarNode* carPtr = args;
     Cell next_pos;
+    board.charsBoard[carPtr->location.i][carPtr->location.j] = '*';
+    //print_action();
     while (1)
     {
         usleep(INTER_MOVES_IN_NS / (double)1000);
         if (on_corner(carPtr->location) && carPtr->justBorn == 0 && (rand() % 100 < FIN_PROB * 100)) {
-            // remove car
-            safe_mutex_lock(carPtr, &board.carListMutex);
             // delete yourself from the doubly_linked_list
             delete_self(carPtr);
             pthread_exit(NULL);
@@ -255,16 +271,23 @@ void carEntity(void* args) {
             // move car
             next_pos = get_next_position(carPtr->location);
 
+
             // this code is a deadlock potential code since we first lock and then unlock but it is neccessary to insure that a car doesn't lose it's spot
             // the deadlock will not happen only because the generator insures there will never be too many cars in the circle(by adding a new car only if there are two open slots)
-            safe_mutex_lock(carPtr, &board.mutexBoard[next_pos.x][next_pos.y]); // lock the next position
-            pthread_mutex_unlock(&board.mutexBoard[carPtr->location.x][carPtr->location.y]);         // unlock the current position
 
+
+            safe_mutex_lock(carPtr, &board.mutexBoard[next_pos.i][next_pos.j]); // lock the next position
+            board.charsBoard[carPtr->location.i][carPtr->location.j] = ' ';
+            board.charsBoard[next_pos.i][next_pos.j] = '*';
+
+            pthread_mutex_unlock(&board.mutexBoard[carPtr->location.i][carPtr->location.j]);         // unlock the current position
+            //print_action();
             carPtr->location = next_pos;
             if (on_corner(carPtr->location)) {
                 carPtr->justBorn = 0;
             }
         }
+
     }
 
 }
@@ -281,52 +304,66 @@ int safe_mutex_lock(CarNode* me, pthread_mutex_t* mutex) {
     run_failed = 1;
     delete_self(me);
     pthread_exit(NULL);
-    return -1;
+
 }
 
 void delete_self(CarNode* me) {
-    if (me->prevCar == NULL) { // we are the first car
-        pthread_mutex_lock(&board.carListMutex);   // if this failes we have have nothing we can do.
+
+    pthread_mutex_lock(&board.carListMutex);   // if this failes we have have nothing we can do.
+    me->debug = 'F';
+    board.charsBoard[me->location.i][me->location.j] = ' ';
+
+    pthread_mutex_unlock(&board.mutexBoard[me->location.i][me->location.j]);         // unlock the current position
+
+    printf("FREE %d, %d THREAD %d\n",  me->location.i, me->location.j, pthread_self());
+    if (me->nextCar==NULL && me->prevCar == NULL){
+        board.carList = NULL;
+    }
+    else if (me->prevCar == NULL) { // we are the first car
         board.carList = me->nextCar;
         me->nextCar->prevCar = NULL;
-        pthread_mutex_unlock(&board.carListMutex);
+    }
+
+    else if (me->nextCar ==NULL) {
+        me->prevCar->nextCar = NULL;
     }
     else { // we are in the middle
-        pthread_mutex_lock(&board.carListMutex);   // if this failes we have have nothing we can do.
-        me->prevCar->nextCar = me->nextCar;
-        me->nextCar->prevCar = me->prevCar;
-        pthread_mutex_unlock(&board.carListMutex);
-    }
-    free(me);
+            me->prevCar->nextCar = me->nextCar;
+            me->nextCar->prevCar = me->prevCar;
+        }
+    pthread_mutex_unlock(&board.carListMutex);
+    // free(me);
 }
 
 Cell get_next_position(Cell curr_pos) {
     Cell new_loc;
-    if (curr_pos.x == 0 && curr_pos.y > 0) {
+    if (curr_pos.i == 0 && curr_pos.j > 0) {
         // we are in the top row and moving left
-        new_loc.x = curr_pos.x;
-        new_loc.y = curr_pos.y - 1;
+        new_loc.i = curr_pos.i;
+        new_loc.j = curr_pos.j - 1 ;
     }
-    else if (curr_pos.x == N - 1 && curr_pos.y < N - 1) {
+
+    else if (curr_pos.i == N - 1 && curr_pos.j < N - 1) {
         // we are in the bottom row and moving right
-        new_loc.x = curr_pos.x;
-        new_loc.y = curr_pos.y + 1;
+        new_loc.i = curr_pos.i;
+        new_loc.j = curr_pos.j + 1;
     }
-    else if (curr_pos.y == 0 || curr_pos.x < N - 1) {
+    else if (curr_pos.j == 0 && curr_pos.i < N - 1) {
         // we are in the left column and moving down
-        new_loc.x = curr_pos.x + 1;
-        new_loc.y = curr_pos.y;
+        new_loc.i = curr_pos.i + 1;
+        new_loc.j = curr_pos.j;
     }
     else {
         // we are in the right column and moving up
-        new_loc.x = curr_pos.x - 1;
-        new_loc.y = curr_pos.y;
+        new_loc.i = curr_pos.i - 1;
+        new_loc.j = curr_pos.j;
     }
+
     return new_loc;
 }
 
 // check if you are on a sink/generator square(on the corners)
 int on_corner(Cell curr_pos) {
-    return ((curr_pos.x == 0 || curr_pos.x == N - 1) && (curr_pos.y == 0 || curr_pos.y == N - 1));
+    return ((curr_pos.i == 0 || curr_pos.i == N - 1) && (curr_pos.j == 0 || curr_pos.j == N - 1));
 }
 
