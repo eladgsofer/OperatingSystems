@@ -68,28 +68,28 @@ void initCarAgent(carGenerator* carGen, int agentId){
 
     switch (agentId) {
         case 1:
-            carGen->curCell.i = N - 1;
-            carGen->curCell.j = 0;
-            carGen->prevCell.i = N - 1;
-            carGen->prevCell.j = 1;
+            carGen->curCell.i = 0;
+            carGen->curCell.j = N-1;
+            carGen->prevCell.i = 1;
+            carGen->prevCell.j = N-1;
             break;
         case 2:
             carGen->curCell.i =  0;
             carGen->curCell.j = 0;
-            carGen->prevCell.i = 1;
+            carGen->prevCell.i = 0;
             carGen->prevCell.j = 1;
             break;
         case 3:
-            carGen->curCell.i =  0;
-            carGen->curCell.j = N - 1;
+            carGen->curCell.i =  N - 1;
+            carGen->curCell.j = 0;
             carGen->prevCell.i = N - 2;
             carGen->prevCell.j = 0;
             break;
         case 4:
             carGen->curCell.i = N - 1;
             carGen->curCell.j = N - 1;
-            carGen->prevCell.i = N - 2;
-            carGen->prevCell.j = N - 1;
+            carGen->prevCell.i = N - 1;
+            carGen->prevCell.j = N - 2;
             break;
         default:
             break;
@@ -202,8 +202,9 @@ _Noreturn void generateCar(void* carGen)
         board.carList = newCar;
         board.carList->nextCar = temp;
 
-        pthread_mutex_lock(&board.mutexBoard[carGenObj->curCell.i][carGenObj->curCell.j]);
         pthread_mutex_lock(&board.mutexBoard[carGenObj->prevCell.i][carGenObj->prevCell.j]);
+        pthread_mutex_lock(&board.mutexBoard[carGenObj->curCell.i][carGenObj->curCell.j]);
+
 
         if(pthread_create(&(newCar ->carThread), NULL, carEntity, newCar)){
             perror("Error in creating!\n");
