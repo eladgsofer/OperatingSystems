@@ -69,9 +69,9 @@ void initCarAgent(carGenerator* carGen, int agentId){
     switch (agentId) {
         case 1:
             carGen->curCell.i = 0;
-            carGen->curCell.j = N-1;
+            carGen->curCell.j = N - 1;
             carGen->prevCell.i = 1;
-            carGen->prevCell.j = N-1;
+            carGen->prevCell.j = N - 1;
             break;
         case 2:
             carGen->curCell.i =  0;
@@ -105,7 +105,7 @@ int main() {
     time_t t;
     board.carList = NULL;
 
-    int i, id[4] = {0,1,2,3}; //Station ids
+    int i;
     srand((unsigned) time(&t));
     initBoard();
 
@@ -141,9 +141,9 @@ void initBoard() {
                 board.charsBoard[i][j] = CENTER_MARK;
         }
     // Initialize Mutex rows & columns
-    for (i = 0;i < N;i += N - 1)
+    for (i = 0;i < N;i ++)
         for (j = 0;j < N;j++)
-            if (pthread_mutex_init(&board.mutexBoard[i][j], NULL) || pthread_mutex_init(&board.mutexBoard[j][i], NULL)) {
+            if (pthread_mutex_init(&board.mutexBoard[i][j], NULL)) {
                 perror("Error in initializing panel mutex!\n");
                 exit(EXIT_FAILURE);
             }
@@ -188,6 +188,8 @@ _Noreturn void generateCar(void* carGen)
 
     while (1){
 
+
+
         rand_interval = rand()%(MAX_INTER_ARRIVAL_IN_NS - MIN_INTER_ARRIVAL_IN_NS) + MIN_INTER_ARRIVAL_IN_NS;
         usleep(rand_interval / (double)1000); // Convert [nsec] to [usec]
         // generate a car in the board
@@ -197,10 +199,14 @@ _Noreturn void generateCar(void* carGen)
         newCar ->location = carGenObj->curCell;
         newCar ->prevCar = NULL;
 
-        CarNode* temp = board.carList;
+        // if this failes we have have nothing we can do.
+        pthread_mutex_lock(&board.carListMutex);
 
+        CarNode* temp = board.carList;
         board.carList = newCar;
         board.carList->nextCar = temp;
+
+        pthread_mutex_unlock(&board.carListMutex);
 
         pthread_mutex_lock(&board.mutexBoard[carGenObj->prevCell.i][carGenObj->prevCell.j]);
         pthread_mutex_lock(&board.mutexBoard[carGenObj->curCell.i][carGenObj->curCell.j]);
@@ -224,14 +230,17 @@ void closeSystem(int returnCode) {
     for (int i = 0;i < 4;i++) {
         pthread_cancel(carAgents[i].genThread);
     }
+
     // close all the cars(threads and memory)
     while (board.carList != NULL) {
         tempNode = board.carList;
+
         board.carList = tempNode->nextCar;
 
         pthread_cancel(tempNode->carThread);
 
         free(tempNode);
+
     }
     // close the LL mutex
     pthread_mutex_destroy(&board.carListMutex);
@@ -303,11 +312,11 @@ int safe_mutex_lock(CarNode* me, pthread_mutex_t* mutex) {
 
 void delete_self(CarNode* me) {
 
-    pthread_mutex_lock(&board.carListMutex);   // if this failes we have have nothing we can do.
-    board.charsBoard[me->location.i][me->location.j] = ' ';
 
+    board.charsBoard[me->location.i][me->location.j] = ' ';
     pthread_mutex_unlock(&board.mutexBoard[me->location.i][me->location.j]);         // unlock the current position
 
+/*    pthread_mutex_lock(&board.carListMutex);   // if this failes we have have nothing we can do.
     //printf("FREE %d, %d THREAD %d\n",  me->location.i, me->location.j, pthread_self());
     if (me->nextCar==NULL && me->prevCar == NULL){
         board.carList = NULL;
@@ -324,8 +333,10 @@ void delete_self(CarNode* me) {
             me->prevCar->nextCar = me->nextCar;
             me->nextCar->prevCar = me->prevCar;
         }
-    pthread_mutex_unlock(&board.carListMutex);
-    // free(me);
+
+    free(me);
+    pthread_mutex_unlock(&board.carListMutex);*/
+
 }
 
 Cell get_next_position(Cell curr_pos) {
