@@ -1,11 +1,11 @@
-#include <stdio.h>
 
+#include <stdio.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
+#include <errno.h>                                                              
 #define N 5
 #define FIN_PROB 0.1
 #define MIN_INTER_ARRIVAL_IN_NS 8000000
@@ -183,7 +183,7 @@ void print_action(){
 _Noreturn void generateCar(void* carGen)
 {
     int rand_interval;
-
+    int trylockReturn;
     carGenerator* carGenObj = (carGenerator*)carGen;
 
     while (1){
@@ -199,22 +199,30 @@ _Noreturn void generateCar(void* carGen)
         newCar ->location = carGenObj->curCell;
         newCar ->prevCar = NULL;
 
-        // if this failes we have have nothing we can do.
-        pthread_mutex_lock(&board.carListMutex);
+
+
+
+
+        pthread_mutex_lock(&board.carListMutex);   // if this failes we have have nothing we can do.
+
 
         CarNode* temp = board.carList;
         board.carList = newCar;
         board.carList->nextCar = temp;
 
-        pthread_mutex_unlock(&board.carListMutex);
+
+
+
+	 pthread_mutex_unlock(&board.carListMutex);   // if this failes we have have nothing we can do.
 
         pthread_mutex_lock(&board.mutexBoard[carGenObj->prevCell.i][carGenObj->prevCell.j]);
-        pthread_mutex_lock(&board.mutexBoard[carGenObj->curCell.i][carGenObj->curCell.j]);
+        trylockReturn = pthread_mutex_trylock(&board.mutexBoard[carGenObj->curCell.i][carGenObj->curCell.j]);
+	if (trylockReturn == 0) {
 
-
-        if(pthread_create(&(newCar ->carThread), NULL, carEntity, newCar)){
-            perror("Error in creating!\n");
-            closeSystem(EXIT_FAILURE);
+		if(pthread_create(&(newCar ->carThread), NULL, carEntity, newCar)){
+		    perror("Error in creating!\n");
+		    closeSystem(EXIT_FAILURE);
+		}
         }
 
         // pthread_mutex_unlock(&board.mutexBoard[carGenObj->curCell.i][carGenObj->curCell.j]);
@@ -232,16 +240,19 @@ void closeSystem(int returnCode) {
     }
 
     // close all the cars(threads and memory)
+    pthread_mutex_lock(&board.carListMutex);   // if this failes we have have nothing we can do.
     while (board.carList != NULL) {
         tempNode = board.carList;
 
         board.carList = tempNode->nextCar;
 
         pthread_cancel(tempNode->carThread);
-
+	    
+    	//printf("close system FREE %d, %d THREAD %d\n",  tempNode->location.i, tempNode->location.j, tempNode->carThread);
         free(tempNode);
 
     }
+    pthread_mutex_unlock(&board.carListMutex);   // if this failes we have have nothing we can do.
     // close the LL mutex
     pthread_mutex_destroy(&board.carListMutex);
 
@@ -264,32 +275,28 @@ void carEntity(void* args) {
     while (1)
     {
         usleep(INTER_MOVES_IN_NS / (double)1000);
-        if (on_corner(carPtr->location) && carPtr->justBorn == FALSE && (rand() % 100 < FIN_PROB * 100)) {
+        if (on_corner(carPtr->location) && carPtr->justBorn == FALSE && (rand() % 100 < FIN_PROB * 100)) { // DELETE
             // delete yourself from the doubly_linked_list
             delete_self(carPtr);
             pthread_exit(NULL);
             // 
             pthread_mutex_unlock(&board.carListMutex);
         }
-        else {
-            // move car
-            next_pos = get_next_position(carPtr->location);
+        else { // MOVE
+    	    next_pos = get_next_position(carPtr->location);
+            if (safe_mutex_lock(carPtr, &board.mutexBoard[next_pos.i][next_pos.j]) == 0){ // lock the next position
+            	    // move car
+		    board.charsBoard[carPtr->location.i][carPtr->location.j] = ' ';
+		    board.charsBoard[next_pos.i][next_pos.j] = CAR_MARK;
 
-
-            // this code is a deadlock potential code since we first lock and then unlock but it is neccessary to insure that a car doesn't lose it's spot
-            // the deadlock will not happen only because the generator insures there will never be too many cars in the circle(by adding a new car only if there are two open slots)
-
-
-            safe_mutex_lock(carPtr, &board.mutexBoard[next_pos.i][next_pos.j]); // lock the next position
-            board.charsBoard[carPtr->location.i][carPtr->location.j] = ' ';
-            board.charsBoard[next_pos.i][next_pos.j] = CAR_MARK;
-
-            pthread_mutex_unlock(&board.mutexBoard[carPtr->location.i][carPtr->location.j]);         // unlock the current position
-            //print_action();
-            carPtr->location = next_pos;
-            if (on_corner(carPtr->location)) {
-                carPtr->justBorn = FALSE;
+		    pthread_mutex_unlock(&board.mutexBoard[carPtr->location.i][carPtr->location.j]);         // unlock the current position
+		    carPtr->location = next_pos;
+		    if (on_corner(carPtr->location)) {
+		        carPtr->justBorn = FALSE;
+		    }
             }
+            //print_action();
+            
         }
 
     }
@@ -299,11 +306,13 @@ void carEntity(void* args) {
 
 int safe_mutex_lock(CarNode* me, pthread_mutex_t* mutex) {
     int returnValue;
-    returnValue = pthread_mutex_lock(mutex);
+    returnValue = pthread_mutex_trylock(mutex);
     if (returnValue == 0) {
         return 0;
     }
-
+    if (returnValue == EBUSY){
+    	return 1;
+    }
     // if we reached here then the lock failed
     delete_self(me);
     pthread_exit(NULL);
@@ -311,31 +320,10 @@ int safe_mutex_lock(CarNode* me, pthread_mutex_t* mutex) {
 }
 
 void delete_self(CarNode* me) {
-
-
+	
     board.charsBoard[me->location.i][me->location.j] = ' ';
     pthread_mutex_unlock(&board.mutexBoard[me->location.i][me->location.j]);         // unlock the current position
 
-/*    pthread_mutex_lock(&board.carListMutex);   // if this failes we have have nothing we can do.
-    //printf("FREE %d, %d THREAD %d\n",  me->location.i, me->location.j, pthread_self());
-    if (me->nextCar==NULL && me->prevCar == NULL){
-        board.carList = NULL;
-    }
-    else if (me->prevCar == NULL) { // we are the first car
-        board.carList = me->nextCar;
-        me->nextCar->prevCar = NULL;
-    }
-
-    else if (me->nextCar ==NULL) {
-        me->prevCar->nextCar = NULL;
-    }
-    else { // we are in the middle
-            me->prevCar->nextCar = me->nextCar;
-            me->nextCar->prevCar = me->prevCar;
-        }
-
-    free(me);
-    pthread_mutex_unlock(&board.carListMutex);*/
 
 }
 
