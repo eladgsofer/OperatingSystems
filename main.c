@@ -107,7 +107,7 @@ int MMU(){
                 break;
         }
     }
-
+    exit(1);
 
 }
 
