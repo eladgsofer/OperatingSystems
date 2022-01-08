@@ -4,4 +4,4 @@ project(OperatingSystems C)
 set(CMAKE_C_STANDARD 11)
 
 add_executable(OperatingSystems
-        main.c)
+        hw5/main.c)
