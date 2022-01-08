@@ -20,7 +20,7 @@
 /// Probabilities
 #define HIT_RATE 					0.9
 #define HIT_RATE_IN_PERCENTS 		HIT_RATE*100
-#define WR_RATE 					0.99
+#define WR_RATE 					0.02
 #define WR_RATE_IN_PERCENTS			WR_RATE*100
 
 /// Times
@@ -60,6 +60,7 @@
 # define PROC0_IDX 2
 # define PROC1_IDX 3
 # define HD_IDX 4
+# define TIMER_IDX 5
 
 
 
@@ -87,20 +88,20 @@ int user_proc(int id);
 int myMsgSend(int msqid, const msgbuf*msgp);
 int sendStopSim(int id,int reason);
 int MMU();
+void timer();
 
 key_t mailBoxes[5];
 
 int main() {
     pid_t child_pid;
-
+    msgbuf return_msg;
     for (int i=0;i<5;i++){
 
 
         mailBoxes[i] = msgget(BASE_KEY+i, 0600 | IPC_CREAT);
-        // clear the buffer of old messages
         msgctl(mailBoxes[i],IPC_RMID,NULL);
+        mailBoxes[i] = msgget(BASE_KEY+i, 0600 | IPC_CREAT);
     }
-    ;
 //    if ((child_pid = fork()) == 0){
 //        user_proc(PROC0_IDX);
 //    }
@@ -108,49 +109,56 @@ int main() {
 //    if (child_pid == 0){
 //        user_proc(PROC1_IDX);
 //    }
-    MMU();
+//    MMU();
 //    child_pid = fork();
 //    if (child_pid == 0){
 //        MMU();
 //    }
-    sleep(15);
+    child_pid = fork();
+    if (child_pid == 0){
+        timer();
+    }
+    msgrcv(mailBoxes[MAIN_IDX] , &return_msg, sizeof(msgbuf) - sizeof(long), 1,0);
+    printf("closing system\n");
+    printf("closed by: %d for reason: %d",return_msg.srcMbx,return_msg.mtext);
     return 0;
 }
 
 int user_proc(int id){
     float writeProb = 0;
-    msgbuf data;
-    data.mtype = 1;
-    data.srcMbx = id;
+    msgbuf tx,rx;
+    tx.mtype = 1;
+    tx.srcMbx = id;
     while(TRUE){
         usleep(INTER_MEM_ACCS_T/(double)1000);
         writeProb = (rand()%1000)/(double)1000;
         if (writeProb<WR_RATE){ // write
-            data.mtext = WRITE;
+            tx.mtext = WRITE;
         } else { // read
-            data.mtext = READ;
+            tx.mtext = READ;
         }
-        myMsgSend(mailBoxes[MMU_IDX],&data);
+        printf("id = %d\n",id);
+        myMsgSend(mailBoxes[MMU_IDX],&tx);
+        myMsgGet(mailBoxes[MMU_IDX],&rx);
+
     }
     return 1;
 }
 
 int MMU(){
     msgbuf rxMsg, txMsg;
-    printf("hello\n");
     while (myMsgGet(MMU_IDX, &rxMsg))
     {
-        printf("balo\n");
 
         switch (rxMsg.srcMbx) {
 
             case PROC0_IDX:
-                printf("Message from PROC0 %c", rxMsg.mtext);
+                printf("Message from PROC0 %c\n", '0'+rxMsg.mtext);
             case PROC1_IDX:
-                printf("Message from PROC1 %c", rxMsg.mtext);
+                printf("Message from PROC1 %c\n", '0'+rxMsg.mtext);
                 break;
             case HD_IDX:
-                printf("Message from HD %c", rxMsg.mtext);
+                printf("Message from HD %c\n", '0'+rxMsg.mtext);
                 break;
             default:
                 break;
@@ -163,13 +171,11 @@ int MMU(){
 int myMsgGet(int mailBoxId, msgbuf* rxMsg){
 
     int res;
-    printf("wait...");
-    if((res = msgrcv(mailBoxes[mailBoxId] , &rxMsg, sizeof(msgbuf) - sizeof(long), 1,0)) == -1){
-        puts("MESSAGE RECEIVE ERROR");
+    if((res = msgrcv(mailBoxes[mailBoxId] , rxMsg, sizeof(msgbuf) - sizeof(long), 1,0)) == -1){
+        perror("MESSAGE RECEIVE ERROR");
         sendStopSim(mailBoxId,RECV_FAILED);
         return FALSE;
     }
-    printf(" msg rx %c", rxMsg->mtext);
     return TRUE;
 
 }
@@ -187,10 +193,15 @@ int myMsgSend(int msqid, const msgbuf* msgp){
 
 int sendStopSim(int id,int reason){
     msgbuf data;
-    data.mtype = 0;
+    data.mtype = 1;
     data.srcMbx = id;
     data.mtext = reason;
+    printf("id = %d\n",id);
     // send message to main to stop simulation
     msgsnd(mailBoxes[MAIN_IDX], &data,0,0);
     exit(reason);
+}
+void timer(){
+    sleep(SIM_T);
+    sendStopSim(TIMER_IDX,0);
 }
