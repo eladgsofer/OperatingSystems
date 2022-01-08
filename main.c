@@ -16,6 +16,7 @@
 #define WRITE 1
 #define SEND_FAILED -2
 #define RECV_FAILED -3
+#define MUTEX_LOCK_FAILED -4
 
 /// Probabilities
 #define HIT_RATE 					0.9
@@ -188,6 +189,20 @@ int myMsgSend(int msqid, const msgbuf* msgp){
         sendStopSim(msgp->srcMbx,SEND_FAILED);
     }
     return res;
+}
+
+// this is a wrapper for the try lock that makes sure the return value of the lock is okay and if not it closes the car
+int myTryMutexLock(pthread_mutex_t* mutex,int self_id) {
+    int res;
+    res = pthread_mutex_trylock(mutex);
+    if (res == 0) {
+        return 0;
+    }
+    if (res == EBUSY){
+        return 1;
+    }
+    // if we reached here then the lock failed
+    sendStopSim(self_id,MUTEX_LOCK_FAILED);
 }
 
 
