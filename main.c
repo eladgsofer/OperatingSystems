@@ -46,6 +46,15 @@
 #define HD_REQ 			3
 #define HD_ACK 			4
 
+# define MAIN_IDX 1000
+# define MMU_IDX 1
+# define PROC0_IDX 2
+# define PROC1_IDX 3
+# define HD_IDX 4
+
+
+
+
 ///////////////////////////////////////////Structs/////////////////////////////////////////////////////
 /* Message struct - as suggested in given material in exercise 5
  * 		There are two fields in the struct:
@@ -62,14 +71,55 @@ typedef struct msgbuf{
     char mtext;
 } msgbuf;
 
+//////////////////////////////// prototypes ////////////////////////////////
+int myMsgGet(int mailBoxId, msgbuf* rxMsg);
+
+int mailBoxes[5];
+
 int main() {
-    printf("hey");
+
+    for (int i=0;i<5;i++){
+        mailBoxes[i] = msgget(MAIN_IDX+i, 0600 | IPC_CREAT);
+    }
     return 0;
 }
 
 int user_proc(){
 
 }
+
 int MMU(){
-    
+    msgbuf rxMsg, txMsg;
+
+    while (myMsgGet(MMU_IDX, &rxMsg))
+    {
+        switch (rxMsg.srcMbx) {
+
+            case PROC0_IDX:
+                printf("Message from PROC0 %c", rxMsg.mtext);
+            case PROC1_IDX:
+                printf("Message from PROC1 %c", rxMsg.mtext);
+                break;
+            case HD_IDX:
+                printf("Message from HD %c", rxMsg.mtext);
+                break;
+            default:
+                break;
+        }
+    }
+
+
+}
+
+int myMsgGet(int mailBoxId, msgbuf* rxMsg){
+
+    int res;
+
+    if((res = msgrcv(mailBoxes[mailBoxId] , &rxMsg, sizeof(msgbuf) - sizeof(long), 1,0)) == -1){
+        puts("MESSAGE RECEIVE ERROR");
+        // TODO - SEND EXIT MESSAGE
+        return FALSE;
+    }
+    return TRUE;
+
 }
