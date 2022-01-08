@@ -58,7 +58,8 @@
  * */
 typedef struct msgbuf{
     long mtype;
-    char mtext[MSG_BUFFER_SIZE];
+    int  srcMbx;
+    char mtext;
 } msgbuf;
 
 int main() {
@@ -66,6 +67,9 @@ int main() {
     return 0;
 }
 
+int user_proc(){
+
+}
 int MMU(){
     
 }
