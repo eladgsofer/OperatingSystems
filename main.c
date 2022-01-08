@@ -9,6 +9,14 @@
 #include <sys/msg.h>				// For message use
 #include <sys/errno.h>				// For errno
 
+
+#define TRUE 1
+#define FALSE 0
+#define READ 0
+#define WRITE 1
+#define SEND_FAILED -2
+#define RECV_FAILED -3
+
 /// Probabilities
 #define HIT_RATE 					0.9
 #define HIT_RATE_IN_PERCENTS 		HIT_RATE*100
@@ -46,7 +54,8 @@
 #define HD_REQ 			3
 #define HD_ACK 			4
 
-# define MAIN_IDX 1000
+# define BASE_KEY 2000
+# define MAIN_IDX 0
 # define MMU_IDX 1
 # define PROC0_IDX 2
 # define PROC1_IDX 3
@@ -71,21 +80,43 @@ typedef struct msgbuf{
     char mtext;
 } msgbuf;
 
+
 //////////////////////////////// prototypes ////////////////////////////////
 int myMsgGet(int mailBoxId, msgbuf* rxMsg);
+int user_proc(int id);
+//int myMsgSend(int msqid, const void*msgp,int src);
+void myMsgSend(int qid_t, msgbuf* msg);
+int sendStopSim(int id,int reason);
 
-int mailBoxes[5];
+
+key_t mailBoxes[5];
 
 int main() {
 
     for (int i=0;i<5;i++){
-        mailBoxes[i] = msgget(MAIN_IDX+i, 0600 | IPC_CREAT);
+
+        mailBoxes[i] = msgget(BASE_KEY+i, 0600 | IPC_CREAT);
     }
+    user_proc(1);
     return 0;
 }
 
-int user_proc(){
-
+int user_proc(int id){
+    float writeProb = 0;
+    msgbuf data;
+    data.mtype = 0;
+    data.srcMbx = id;
+    while(TRUE){
+        usleep(INTER_MEM_ACCS_T/(double)1000);
+        writeProb = (rand()%1000)/(double)1000;
+        if (writeProb<WR_RATE){ // write
+            data.mtext = WRITE;
+        } else { // read
+            data.mtext = READ;
+        }
+        myMsgSend(mailBoxes[MMU_IDX],&data);
+    }
+    return 1;
 }
 
 int MMU(){
@@ -117,9 +148,45 @@ int myMsgGet(int mailBoxId, msgbuf* rxMsg){
 
     if((res = msgrcv(mailBoxes[mailBoxId] , &rxMsg, sizeof(msgbuf) - sizeof(long), 1,0)) == -1){
         puts("MESSAGE RECEIVE ERROR");
-        // TODO - SEND EXIT MESSAGE
+        sendStopSim(mailBoxId,RECV_FAILED);
         return FALSE;
     }
     return TRUE;
 
+}
+
+
+//int myMsgSend(int msqid, const void*msgp,int src){
+//    int res;
+//    res = msgsnd(msqid,msgp,sizeof(msgbuf) - sizeof(long),0);
+//    printf("%d",sizeof(msgbuf) - sizeof(long));
+//    if (res == -1){
+//        sendStopSim(src,SEND_FAILED);
+//    }
+//    return res;
+//}
+
+void myMsgSend(int qid_t, msgbuf* msg){
+    /* Sends a message to the given Q (via its ID). Exits program if there is an error
+     * 		NOTE: Blocks process if queue is full
+     * Input: [qid_t] - Queue ID
+     * 		  [msg] - Pointer to a message
+     * Output: None
+     * */
+
+    int res;
+
+    if((res = msgsnd(qid_t, msg, sizeof(msgbuf)-sizeof(long) , 0)) == -1){
+        perror("msg send error");
+        puts("Error in sending message");
+    }
+}
+int sendStopSim(int id,int reason){
+    msgbuf data;
+    data.mtype = 0;
+    data.srcMbx = id;
+    data.mtext = reason;
+    // send message to main to stop simulation
+    msgsnd(mailBoxes[MAIN_IDX], &data,0,0);
+    exit(reason);
 }
