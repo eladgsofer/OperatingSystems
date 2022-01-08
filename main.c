@@ -84,27 +84,43 @@ typedef struct msgbuf{
 //////////////////////////////// prototypes ////////////////////////////////
 int myMsgGet(int mailBoxId, msgbuf* rxMsg);
 int user_proc(int id);
-//int myMsgSend(int msqid, const void*msgp,int src);
-void myMsgSend(int qid_t, msgbuf* msg);
+int myMsgSend(int msqid, const msgbuf*msgp);
 int sendStopSim(int id,int reason);
-
+int MMU();
 
 key_t mailBoxes[5];
 
 int main() {
+    pid_t child_pid;
 
     for (int i=0;i<5;i++){
 
+
         mailBoxes[i] = msgget(BASE_KEY+i, 0600 | IPC_CREAT);
+        // clear the buffer of old messages
+        msgctl(mailBoxes[i],IPC_RMID,NULL);
     }
-    user_proc(1);
+    ;
+//    if ((child_pid = fork()) == 0){
+//        user_proc(PROC0_IDX);
+//    }
+//    child_pid = fork();
+//    if (child_pid == 0){
+//        user_proc(PROC1_IDX);
+//    }
+    MMU();
+//    child_pid = fork();
+//    if (child_pid == 0){
+//        MMU();
+//    }
+    sleep(15);
     return 0;
 }
 
 int user_proc(int id){
     float writeProb = 0;
     msgbuf data;
-    data.mtype = 0;
+    data.mtype = 1;
     data.srcMbx = id;
     while(TRUE){
         usleep(INTER_MEM_ACCS_T/(double)1000);
@@ -121,9 +137,11 @@ int user_proc(int id){
 
 int MMU(){
     msgbuf rxMsg, txMsg;
-
+    printf("hello\n");
     while (myMsgGet(MMU_IDX, &rxMsg))
     {
+        printf("balo\n");
+
         switch (rxMsg.srcMbx) {
 
             case PROC0_IDX:
@@ -145,42 +163,28 @@ int MMU(){
 int myMsgGet(int mailBoxId, msgbuf* rxMsg){
 
     int res;
-
+    printf("wait...");
     if((res = msgrcv(mailBoxes[mailBoxId] , &rxMsg, sizeof(msgbuf) - sizeof(long), 1,0)) == -1){
         puts("MESSAGE RECEIVE ERROR");
         sendStopSim(mailBoxId,RECV_FAILED);
         return FALSE;
     }
+    printf(" msg rx %c", rxMsg->mtext);
     return TRUE;
 
 }
 
 
-//int myMsgSend(int msqid, const void*msgp,int src){
-//    int res;
-//    res = msgsnd(msqid,msgp,sizeof(msgbuf) - sizeof(long),0);
-//    printf("%d",sizeof(msgbuf) - sizeof(long));
-//    if (res == -1){
-//        sendStopSim(src,SEND_FAILED);
-//    }
-//    return res;
-//}
-
-void myMsgSend(int qid_t, msgbuf* msg){
-    /* Sends a message to the given Q (via its ID). Exits program if there is an error
-     * 		NOTE: Blocks process if queue is full
-     * Input: [qid_t] - Queue ID
-     * 		  [msg] - Pointer to a message
-     * Output: None
-     * */
-
+int myMsgSend(int msqid, const msgbuf* msgp){
     int res;
-
-    if((res = msgsnd(qid_t, msg, sizeof(msgbuf)-sizeof(long) , 0)) == -1){
-        perror("msg send error");
-        puts("Error in sending message");
+    res = msgsnd(msqid,msgp,sizeof(msgbuf) - sizeof(long),0);
+    if (res == -1){
+        sendStopSim(msgp->srcMbx,SEND_FAILED);
     }
+    return res;
 }
+
+
 int sendStopSim(int id,int reason){
     msgbuf data;
     data.mtype = 0;
