@@ -23,7 +23,7 @@
 /// Probabilities
 #define HIT_RATE 					0.9
 #define HIT_RATE_IN_PERCENTS 		HIT_RATE*100
-#define WR_RATE 					0.02
+#define WR_RATE 					0.7
 #define WR_RATE_IN_PERCENTS			WR_RATE*100
 
 /// Times
@@ -57,7 +57,7 @@
 #define HD_REQ 			3
 #define HD_ACK 			4
 
-# define BASE_KEY 2000
+# define BASE_KEY 1200
 
 
 #define PROC_NUMBER 5
@@ -103,7 +103,7 @@ void initSystem();
 void killAllProc();
 //////////////////////////////// prototypes ////////////////////////////////
 
-key_t mailBoxes[PROC_NUMBER];
+key_t mailBoxes[PROC_NUMBER+1];
 pid_t processLst[PROC_NUMBER];
 
 
@@ -133,7 +133,7 @@ void initSystem() {
     int i, j;
 
     for (i=0;i<PROC_NUMBER+1;i++){
-        if ((mailBoxes[i] = msgget(BASE_KEY+i, 0600 | IPC_CREAT) == -1))
+        if ((mailBoxes[i] = msgget(BASE_KEY+i, 0600 | IPC_CREAT)) == -1)
         {
             // Roll back
             for(j=i;j>=0;j--)
@@ -150,18 +150,20 @@ void initSystem() {
         else if (processLst[i]==0){
             switch (i) {
                 case HD_IDX:
-                    //HD();
+                    HD();
                     break;
                 case MMU_IDX:
-                    //MMU();
+                    MMU();
                     break;
                 case TIMER_IDX:
-                    //timer();
+                    timer();
                 case PROC1_IDX:
-                    //user_proc(i);
+                      while(1){;}
+//                    user_proc(i);
                     break;
                 case PROC2_IDX:
-                    //user_proc(i);
+//                      while(1){;}
+                    user_proc(i);
                     break;
             }
         }
@@ -173,7 +175,6 @@ int main() {
 
     signal(SIGKILL, sig_handler); // Register signal handler
     signal(SIGTERM, sig_handler); // Register signal handler
-
     initSystem();
     myMsgGet(MAIN_IDX, &return_msg);
     closeSystem();
@@ -196,9 +197,11 @@ int user_proc(int id){
         } else { // read
             tx.mtext = READ;
         }
-        printf("id = %d\n",id);
-        myMsgSend(mailBoxes[MMU_IDX],&tx);
-        myMsgGet(mailBoxes[MMU_IDX],&rx);
+        printf("user id = %d->MMU\n",id);
+        // send request to the MMU
+        myMsgSend(MMU_IDX,&tx);
+        // wait for ack
+        myMsgGet(id,&rx);
     }
     return 1;
 }
@@ -211,6 +214,9 @@ int HD(){
 int MMU(){
     printf("hi Im MMU!\n");
     msgbuf rxMsg, txMsg;
+    txMsg.mtype = 1;
+    txMsg.mtext = 'A';
+    txMsg.srcMbx = MMU_IDX;
     while (myMsgGet(MMU_IDX, &rxMsg))
     {
 
@@ -219,8 +225,11 @@ int MMU(){
 
             case PROC1_IDX:
                 printf("Message from PROC1 %c\n", '0'+rxMsg.mtext);
+                myMsgSend(PROC1_IDX,&txMsg);
+                break;
             case PROC2_IDX:
                 printf("Message from PROC2 %c\n", '0'+rxMsg.mtext);
+                myMsgSend(PROC2_IDX,&txMsg);
                 break;
             case HD_IDX:
                 printf("Message from HD %c\n", '0'+rxMsg.mtext);
@@ -238,6 +247,7 @@ int myMsgGet(int mailBoxId, msgbuf* rxMsg){
     int res;
     if((res = msgrcv(mailBoxes[mailBoxId] , rxMsg, sizeof(msgbuf) - sizeof(long), 1,0)) == -1){
         perror("MESSAGE RECEIVE ERROR");
+        printf("RECEIVE ERROR TO ID = %d",mailBoxId);
         sendStopSim(mailBoxId, RECV_FAILED);
         return FALSE;
     }
@@ -245,10 +255,10 @@ int myMsgGet(int mailBoxId, msgbuf* rxMsg){
 
 }
 
-int myMsgSend(int msqid, const msgbuf* msgp){
+int myMsgSend(int mailBoxId, const msgbuf* msgp){
     int res;
 
-    res = msgsnd(msqid,msgp,sizeof(msgbuf) - sizeof(long) ,0);
+    res = msgsnd(mailBoxes[mailBoxId],msgp,sizeof(msgbuf) - sizeof(long) ,0);
     if (res == -1){
         sendStopSim(msgp->srcMbx,SEND_FAILED);
     }
@@ -283,6 +293,7 @@ int sendStopSim(int id,int reason){
 void timer(){
     printf("hi Im Timer!\n");
     sleep(SIM_T);
+    printf("times up!\n");
     sendStopSim(TIMER_IDX,0);
 }
 
