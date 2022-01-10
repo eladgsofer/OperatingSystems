@@ -328,7 +328,7 @@ int MMU(){
     exit(1);
 }
 
-
+// The evictor wakes up to clean and free the memory and then sends back the control to the HD
 void evictorThr(){
     msgbuf hdRxMsg,hdTxMsg;
     hdTxMsg.mtype  = HD_IDX; // we have a special type for the HD
@@ -354,7 +354,7 @@ void evictorThr(){
                 pthread_mutex_unlock(&memMutex);
                 // send a request for the hard disk and wait for ack
                 myMsgSend(HD_IDX,&hdTxMsg);
-                myMsgGet(HD_IDX,&hdRxMsg,1);
+                myMsgGet(HD_IDX,&hdRxMsg,2);
                 // hard disk finished take back the control
                 myMutexLock(&memMutex,EVICTOR_IDX);
             }
