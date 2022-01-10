@@ -27,7 +27,7 @@
 #define WR_RATE_IN_PERCENTS			WR_RATE*100
 
 /// Times
-#define SIM_T 					20			//in seconds
+#define SIM_T 					3			//in seconds
 #define TIME_BETWEEN_SNAPSHOTS 	200000000 	//in ns
 #define MEM_WR_T 				10			//in ns
 #define HD_ACCS_T 				10000000	//in ns
@@ -61,7 +61,7 @@
 
 
 #define PROC_NUMBER 5
-
+#define THR_NUM 3
 
 # define MMU_IDX 0
 # define PROC1_IDX 1
@@ -96,8 +96,16 @@ pthread_mutex_t memMutex;
 typedef struct memory{
     int validArr[N];
     int dirtyArr[N];
+    int start;
+    int used;
 } memory;
+memory mmuMemory;
+//                                   S+ used
+//                                   |   USED    |
+//                    ---->|         |------------------------->
+//                    ------------------------------------------
 
+pthread_mutex_t evictCondMut;
 
 //////////////////////////////// prototypes ////////////////////////////////
 int myMsgGet(int mailBoxId, msgbuf* rxMsg);
@@ -112,10 +120,13 @@ int HD();
 void closeSystem();
 void initSystem();
 void killAllProc();
+void printerThr();
+void evictorThr();
 //////////////////////////////// prototypes ////////////////////////////////
 
 key_t mailBoxes[PROC_NUMBER+1];
 pid_t processLst[PROC_NUMBER];
+pthread_t threadLst[THR_NUM];
 
 
 void sig_handler(int signum){
@@ -126,8 +137,16 @@ void sig_handler(int signum){
 void closeSystem() {
     // Kill all processes and queues
     killAllProc();
-    // DESTROY MUTEX
+
     // DESTROY THREADS
+    for (int i=0;i<THR_NUM;i++)
+    {
+        pthread_cancel(threadLst[i]);
+    }
+    // DESTROY MUTEX
+    pthread_mutex_destroy(&evictCondMut);
+    pthread_mutex_destroy(&memMutex);
+
 }
 
 void killAllProc(){
@@ -183,11 +202,63 @@ void initSystem() {
             }
         }
     }
+    // Init mutex
+    if (pthread_mutex_init(&memMutex, NULL)){
+        perror("memMutex mutex failed to open!\n");
+        killAllProc();
+        exit(1);
+    }
+
+    if (pthread_mutex_init(&evictCondMut, NULL)){
+        perror("evictCondMut mutex failed to open!\n");
+        pthread_mutex_destroy(&memMutex);
+        killAllProc();
+        exit(1);
+    }
+//    if (pthread_mutex_init(&pagesInUseMutex, NULL)){
+//        puts("Error in initializing counter's mutex!\n");
+//        pthread_mutex_destroy(&pageMutex);
+//        killAllProc();
+//        exit(1);
+//    }
+//    if (pthread_mutex_init(&indexFIFOMutex, NULL)){
+//        puts("Error in initializing index' mutex!\n");
+//        pthread_mutex_destroy(&pageMutex);
+//        pthread_mutex_destroy(&pagesInUseMutex);
+//        killAllProc();
+//        exit(1);
+//    }
+
+
+    // Create threads
+    if((pthread_create(&threadLst[0], NULL, (void*)MMU, NULL))){
+        puts("Error in creating MMU's main thread!\n");
+        pthread_mutex_destroy(&evictCondMut);
+        pthread_mutex_destroy(&memMutex);
+        killAllProc();
+        exit(1);
+    }
+    if((pthread_create(&threadLst[1], NULL, (void*)evictorThr, NULL))){
+        puts("Error in creating Evicter's thread!\n");
+        pthread_cancel(threadLst[0]);
+        pthread_mutex_destroy(&evictCondMut);
+        pthread_mutex_destroy(&memMutex);
+        killAllProc();
+        exit(1);
+    }
+    if((pthread_create(&threadLst[2], NULL, (void*)printerThr, NULL))){
+        puts("Error in creating Printer's thread!\n");
+        pthread_cancel(threadLst[0]);
+        pthread_cancel(threadLst[1]);
+        pthread_mutex_destroy(&evictCondMut);
+        pthread_mutex_destroy(&memMutex);
+        killAllProc();
+        exit(1);
+    }
 }
 
 int main() {
     msgbuf return_msg;
-
     signal(SIGKILL, sig_handler); // Register signal handler
     signal(SIGTERM, sig_handler); // Register signal handler
     initSystem();
@@ -255,12 +326,25 @@ int MMU(){
     }
     exit(1);
 }
+void evictorThr(){
 
-void printer_thr(){
+}
+
+void printerThr(){
+    memory memCopy;
     printf("Hi I'm the Printer\n");
-
+    int i=0;
+    char c;
     while(TRUE){
+
         myMutexLock(&memMutex,PRINTER_IDX);
+        memCopy = mmuMemory;
+        pthread_mutex_unlock(&memMutex);
+        for (i = 0; i < N; i++){
+            c = (memCopy.validArr[i]) ? ((memCopy.dirtyArr[i]) ? ('0') : ('1')) : ('-');
+            printf("%d|%c\n",i,c);
+        }
+        printf("\n\n");
         usleep(TIME_BETWEEN_SNAPSHOTS/(double)1000);
     }
 }
