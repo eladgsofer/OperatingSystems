@@ -220,10 +220,21 @@ int user_proc(int id){
     }
     return 1;
 }
-int HD(){
-    printf("hi Im HD!\n");
-    exit(1);
-   //return 1;
+int HD() {
+
+    msgbuf tx, rx;
+    tx.mtype = 1;
+    tx.srcMbx = HD_IDX;
+    tx.mtext = 'A';
+
+    while (TRUE) {
+        // RECEIVE REQUEST
+        myMsgGet(HD_IDX, &rx);
+        // PROCESS
+        sleep(HD_ACCS_T);
+        // SEND ACK
+        myMsgSend(MMU_IDX, &tx);
+    }
 }
 
 int MMU(){
