@@ -97,7 +97,7 @@ typedef struct memory{
     int validArr[N];
     int dirtyArr[N];
     int start;
-    int used;
+    int size;
 } memory;
 memory mmuMemory;
 //                                   S+ used
@@ -108,9 +108,9 @@ memory mmuMemory;
 pthread_mutex_t evictCondMut;
 
 //////////////////////////////// prototypes ////////////////////////////////
-int myMsgGet(int mailBoxId, msgbuf* rxMsg);
+int myMsgGet(int mailBoxId, msgbuf* rxMsg, int msgType);
 int user_proc(int id);
-int myMsgSend(int msqid, const msgbuf*msgp);
+int myMsgSend(int mailBoxId, const msgbuf* msgp);
 int myMutexLock(pthread_mutex_t* mutex,int self_id);
 
 int sendStopSim(int id,int reason);
@@ -262,7 +262,7 @@ int main() {
     signal(SIGKILL, sig_handler); // Register signal handler
     signal(SIGTERM, sig_handler); // Register signal handler
     initSystem();
-    myMsgGet(MAIN_IDX, &return_msg);
+    myMsgGet(MAIN_IDX, &return_msg, 1);
     closeSystem();
     printf("closing system\n");
     printf("closed by: %d for reason: %d", return_msg.srcMbx,return_msg.mtext);
@@ -287,7 +287,7 @@ int user_proc(int id){
         // send request to the MMU
         myMsgSend(MMU_IDX,&tx);
         // wait for ack
-        myMsgGet(id,&rx);
+        myMsgGet(id,&rx, 1);
     }
     return 1;
 }
@@ -300,7 +300,7 @@ int HD() {
 
     while (TRUE) {
         // RECEIVE REQUEST
-        myMsgGet(HD_IDX, &rx);
+        myMsgGet(HD_IDX, &rx, 1);
         // PROCESS
         sleep(HD_ACCS_T);
         // SEND ACK
@@ -314,26 +314,9 @@ int MMU(){
     txMsg.mtype = 1;
     txMsg.mtext = 'A';
     txMsg.srcMbx = MMU_IDX;
-    while (myMsgGet(MMU_IDX, &rxMsg))
+    while (myMsgGet(MMU_IDX, &rxMsg, 1))
     {
 
-
-        switch (rxMsg.srcMbx) {
-
-            case PROC1_IDX:
-                printf("Message from PROC1 %c\n", '0'+rxMsg.mtext);
-                myMsgSend(PROC1_IDX,&txMsg);
-                break;
-            case PROC2_IDX:
-                printf("Message from PROC2 %c\n", '0'+rxMsg.mtext);
-                myMsgSend(PROC2_IDX,&txMsg);
-                break;
-            case HD_IDX:
-                printf("Message from HD %c\n", '0'+rxMsg.mtext);
-                break;
-            default:
-                break;
-        }
     }
     exit(1);
 }
@@ -360,10 +343,10 @@ void printerThr(){
     }
 }
 
-int myMsgGet(int mailBoxId, msgbuf* rxMsg){
+int myMsgGet(int mailBoxId, msgbuf* rxMsg, int msgType){
 
     int res;
-    if((res = msgrcv(mailBoxes[mailBoxId] , rxMsg, sizeof(msgbuf) - sizeof(long), 1,0)) == -1){
+    if((res = msgrcv(mailBoxes[mailBoxId] , rxMsg, sizeof(msgbuf) - sizeof(long), msgType,0)) == -1){
         perror("MESSAGE RECEIVE ERROR");
         printf("RECEIVE ERROR TO ID = %d",mailBoxId);
         sendStopSim(mailBoxId, RECV_FAILED);
@@ -414,4 +397,3 @@ void timer(){
     printf("times up!\n");
     sendStopSim(TIMER_IDX,0);
 }
-
