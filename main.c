@@ -113,7 +113,7 @@ pthread_cond_t      condEvict = PTHREAD_COND_INITIALIZER;
 
 //////////////////////////////// prototypes ////////////////////////////////
 int myMsgGet(int mailBoxId, msgbuf* rxMsg, int msgType);
-int user_proc(int id);
+void user_proc(int id);
 int myMsgSend(int mailBoxId, const msgbuf* msgp);
 int myMutexLock(pthread_mutex_t* mutex,int self_id);
 
@@ -236,14 +236,14 @@ void initSystem() {
 
     // Create threads
     if((pthread_create(&threadLst[0], NULL, (void*)MMU, NULL))){
-        puts("Error in creating MMU's main thread!\n");
+        printf("MMU main thread failed to open\n");
         pthread_mutex_destroy(&evictCondMut);
         pthread_mutex_destroy(&memMutex);
         killAllProc();
         exit(1);
     }
     if((pthread_create(&threadLst[1], NULL, (void*)evictorThr, NULL))){
-        puts("Error in creating Evicter's thread!\n");
+        printf("Evictor Thread failed to open!\n");
         pthread_cancel(threadLst[0]);
         pthread_mutex_destroy(&evictCondMut);
         pthread_mutex_destroy(&memMutex);
@@ -251,7 +251,7 @@ void initSystem() {
         exit(1);
     }
     if((pthread_create(&threadLst[2], NULL, (void*)printerThr, NULL))){
-        puts("Error in creating Printer's thread!\n");
+        printf("Printer Thread Failed to open!\n");
         pthread_cancel(threadLst[0]);
         pthread_cancel(threadLst[1]);
         pthread_mutex_destroy(&evictCondMut);
@@ -273,11 +273,13 @@ int main() {
     return 0;
 }
 
-int user_proc(int id){
+
+// the function responsible for the consumer processes
+void user_proc(int id){
     printf("Hi I'm User %d\n", id);
     float writeProb = 0;
     msgbuf tx,rx;
-    tx.mtype = 1;
+    tx.mtype = 1; // general type
     tx.srcMbx = id;
     while(TRUE){
         usleep(INTER_MEM_ACCS_T/(double)1000);
@@ -293,8 +295,8 @@ int user_proc(int id){
         // wait for ack
         myMsgGet(id,&rx, 1);
     }
-    return 1;
 }
+// The Hard Disk processes responsible for simulating the mechanisms of a hard disk by wasting time
 int HD() {
 
     msgbuf tx, rx;
@@ -306,12 +308,13 @@ int HD() {
         // RECEIVE REQUEST
         myMsgGet(HD_IDX, &rx, 1);
         // PROCESS
-        sleep(HD_ACCS_T);
+        usleep(HD_ACCS_T/(double)1000);
         // SEND ACK
-        myMsgSend(MMU_IDX, &tx);
+        myMsgSend(rx.srcMbx, &tx);
     }
 }
 
+// Responsible for the managment of the memory unit
 int MMU(){
     printf("hi Im MMU!\n");
     msgbuf rxMsg, txMsg;
@@ -324,11 +327,14 @@ int MMU(){
     }
     exit(1);
 }
+
+
 void evictorThr(){
     msgbuf hdRxMsg,hdTxMsg;
     hdTxMsg.mtype  = HD_IDX; // we have a special type for the HD
     hdTxMsg.srcMbx = EVICTOR_IDX;
     hdTxMsg.mtext = 'A';
+    int first_eviction = TRUE;
     while (1){
         // wait for your turn
         myMutexLock(&evictCondMut,EVICTOR_IDX);
@@ -336,21 +342,40 @@ void evictorThr(){
             pthread_cond_wait(&condEvict, &evictCondMut);
         pthread_mutex_unlock(&evictCondMut);
 
+        first_eviction = TRUE;
+
         // we have awoken! start the cleansing!
         myMutexLock(&memMutex,EVICTOR_IDX);
         while(mmuMemory.size > USED_SLOTS_TH){
             // we need to synchronize the HD with the dirty page
             if (mmuMemory.dirtyArr[mmuMemory.start] == 1){
                 mmuMemory.dirtyArr[mmuMemory.start] = 0;
-                // send a request for the hard disk
+                // free the mutex to allow the mmu to work on the memory
+                pthread_mutex_unlock(&memMutex);
+                // send a request for the hard disk and wait for ack
                 myMsgSend(HD_IDX,&hdTxMsg);
-                // wait for ack from the hard disk
                 myMsgGet(HD_IDX,&hdRxMsg,1);
+                // hard disk finished take back the control
+                myMutexLock(&memMutex,EVICTOR_IDX);
             }
+
             mmuMemory.validArr[mmuMemory.start] = 0;
+            mmuMemory.size -= 1;
+            // cyclic FIFO eviction
             mmuMemory.start = (mmuMemory.start+1) % N;
+
+            // give back the control to the MMU after the first eviction
+            if (first_eviction) {
+                pthread_mutex_lock(&evictCondMut);
+                state = MMU_STATE;
+                pthread_cond_signal(&condMmu);
+                pthread_mutex_unlock(&evictCondMut);
+
+                first_eviction = FALSE;
+            }
         }
         pthread_mutex_unlock(&memMutex);
+
 
     }
 
@@ -367,7 +392,15 @@ void printerThr(){
         memCopy = mmuMemory;
         pthread_mutex_unlock(&memMutex);
         for (i = 0; i < N; i++){
-            c = (memCopy.validArr[i]) ? ((memCopy.dirtyArr[i]) ? ('0') : ('1')) : ('-');
+            if (memCopy.validArr[i]){
+                if (memCopy.dirtyArr[i]){
+                    c = '0';
+                } else {
+                    c = '1';
+                }
+            } else {
+                c = '-';
+            }
             printf("%d|%c\n",i,c);
         }
         printf("\n\n");
