@@ -8,6 +8,8 @@
 #include <sys/types.h>				// For message use
 #include <sys/msg.h>				// For message use
 #include <sys/errno.h>				// For errno
+#include<signal.h>
+
 
 
 #define TRUE 1
@@ -25,7 +27,7 @@
 #define WR_RATE_IN_PERCENTS			WR_RATE*100
 
 /// Times
-#define SIM_T 					5			//in seconds
+#define SIM_T 					20			//in seconds
 #define TIME_BETWEEN_SNAPSHOTS 	200000000 	//in ns
 #define MEM_WR_T 				10			//in ns
 #define HD_ACCS_T 				10000000	//in ns
@@ -56,12 +58,17 @@
 #define HD_ACK 			4
 
 # define BASE_KEY 2000
-# define MAIN_IDX 0
-# define MMU_IDX 1
-# define PROC0_IDX 2
-# define PROC1_IDX 3
-# define HD_IDX 4
-# define TIMER_IDX 5
+
+
+#define PROC_NUMBER 5
+
+
+# define MMU_IDX 0
+# define PROC1_IDX 1
+# define PROC2_IDX 2
+# define HD_IDX 3
+# define TIMER_IDX 4
+# define MAIN_IDX 5
 
 
 
@@ -90,42 +97,93 @@ int myMsgSend(int msqid, const msgbuf*msgp);
 int sendStopSim(int id,int reason);
 int MMU();
 void timer();
+int HD();
+void closeSystem();
+void initSystem();
+void killAllProc();
+//////////////////////////////// prototypes ////////////////////////////////
 
-key_t mailBoxes[5];
+key_t mailBoxes[PROC_NUMBER];
+pid_t processLst[PROC_NUMBER];
+
+
+void sig_handler(int signum){
+    printf("caught signal %d", signum);
+    closeSystem();
+}
+
+void closeSystem() {
+    // Kill all processes and queues
+    killAllProc();
+    // DESTROY MUTEX
+    // DESTROY THREADS
+}
+
+void killAllProc(){
+    int i;
+    for(i=0;i<5;i++){
+        msgctl(processLst[i],IPC_RMID,NULL);
+        if (i<4)
+            // do not kill the main process.
+            kill(processLst[i], SIGKILL);
+    }
+}
+
+void initSystem() {
+    int i, j;
+
+    for (i=0;i<PROC_NUMBER+1;i++){
+        if ((mailBoxes[i] = msgget(BASE_KEY+i, 0600 | IPC_CREAT) == -1))
+        {
+            // Roll back
+            for(j=i;j>=0;j--)
+                msgctl(mailBoxes[j],IPC_RMID,NULL);
+        }
+    }
+    for (i=0;i<PROC_NUMBER;i++){
+        processLst[i] = fork();
+        if (processLst[i]<0)
+            // Roll back
+            for(j=i;j>=0;j--){
+                kill(processLst[j], SIGKILL);
+            }
+        else if (processLst[i]==0){
+            switch (i) {
+                case HD_IDX:
+                    //HD();
+                    break;
+                case MMU_IDX:
+                    //MMU();
+                    break;
+                case TIMER_IDX:
+                    //timer();
+                case PROC1_IDX:
+                    //user_proc(i);
+                    break;
+                case PROC2_IDX:
+                    //user_proc(i);
+                    break;
+            }
+        }
+    }
+}
 
 int main() {
-    pid_t child_pid;
     msgbuf return_msg;
-    for (int i=0;i<5;i++){
 
+    signal(SIGKILL, sig_handler); // Register signal handler
+    signal(SIGTERM, sig_handler); // Register signal handler
 
-        mailBoxes[i] = msgget(BASE_KEY+i, 0600 | IPC_CREAT);
-        msgctl(mailBoxes[i],IPC_RMID,NULL);
-        mailBoxes[i] = msgget(BASE_KEY+i, 0600 | IPC_CREAT);
-    }
-//    if ((child_pid = fork()) == 0){
-//        user_proc(PROC0_IDX);
-//    }
-//    child_pid = fork();
-//    if (child_pid == 0){
-//        user_proc(PROC1_IDX);
-//    }
-//    MMU();
-//    child_pid = fork();
-//    if (child_pid == 0){
-//        MMU();
-//    }
-    child_pid = fork();
-    if (child_pid == 0){
-        timer();
-    }
-    msgrcv(mailBoxes[MAIN_IDX] , &return_msg, sizeof(msgbuf) - sizeof(long), 1,0);
+    initSystem();
+    myMsgGet(MAIN_IDX, &return_msg);
+    closeSystem();
     printf("closing system\n");
-    printf("closed by: %d for reason: %d",return_msg.srcMbx,return_msg.mtext);
+    printf("closed by: %d for reason: %d", return_msg.srcMbx,return_msg.mtext);
     return 0;
 }
 
 int user_proc(int id){
+    printf("Hi I'm User %d\n", id);
     float writeProb = 0;
     msgbuf tx,rx;
     tx.mtype = 1;
@@ -141,22 +199,28 @@ int user_proc(int id){
         printf("id = %d\n",id);
         myMsgSend(mailBoxes[MMU_IDX],&tx);
         myMsgGet(mailBoxes[MMU_IDX],&rx);
-
     }
     return 1;
 }
+int HD(){
+    printf("hi Im HD!\n");
+    exit(1);
+   //return 1;
+}
 
 int MMU(){
+    printf("hi Im MMU!\n");
     msgbuf rxMsg, txMsg;
     while (myMsgGet(MMU_IDX, &rxMsg))
     {
 
+
         switch (rxMsg.srcMbx) {
 
-            case PROC0_IDX:
-                printf("Message from PROC0 %c\n", '0'+rxMsg.mtext);
             case PROC1_IDX:
                 printf("Message from PROC1 %c\n", '0'+rxMsg.mtext);
+            case PROC2_IDX:
+                printf("Message from PROC2 %c\n", '0'+rxMsg.mtext);
                 break;
             case HD_IDX:
                 printf("Message from HD %c\n", '0'+rxMsg.mtext);
@@ -174,17 +238,17 @@ int myMsgGet(int mailBoxId, msgbuf* rxMsg){
     int res;
     if((res = msgrcv(mailBoxes[mailBoxId] , rxMsg, sizeof(msgbuf) - sizeof(long), 1,0)) == -1){
         perror("MESSAGE RECEIVE ERROR");
-        sendStopSim(mailBoxId,RECV_FAILED);
+        sendStopSim(mailBoxId, RECV_FAILED);
         return FALSE;
     }
     return TRUE;
 
 }
 
-
 int myMsgSend(int msqid, const msgbuf* msgp){
     int res;
-    res = msgsnd(msqid,msgp,sizeof(msgbuf) - sizeof(long),0);
+
+    res = msgsnd(msqid,msgp,sizeof(msgbuf) - sizeof(long) ,0);
     if (res == -1){
         sendStopSim(msgp->srcMbx,SEND_FAILED);
     }
@@ -211,12 +275,14 @@ int sendStopSim(int id,int reason){
     data.mtype = 1;
     data.srcMbx = id;
     data.mtext = reason;
-    printf("id = %d\n",id);
+    printf("STOP SIM, id = %d\n",id);
     // send message to main to stop simulation
-    msgsnd(mailBoxes[MAIN_IDX], &data,0,0);
+    msgsnd(mailBoxes[MAIN_IDX], &data,0, 0);
     exit(reason);
 }
 void timer(){
+    printf("hi Im Timer!\n");
     sleep(SIM_T);
     sendStopSim(TIMER_IDX,0);
 }
+
