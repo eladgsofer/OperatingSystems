@@ -149,6 +149,7 @@ void MMU_Main(){
 			state = MISS;
 		else
 			state = rand() % 100 < HIT_RATE_IN_PERCENTS? HIT : MISS;
+
 		switch (state){
 			case HIT:
 				if (rcvMsg.mtext[0]-'0' == PROC_WRITE_REQ){
@@ -171,6 +172,7 @@ void MMU_Main(){
 
 				}
 				break;
+
 			case MISS:
 				if (pagesInUse == N){
 
@@ -196,6 +198,7 @@ void MMU_Main(){
 
 				//// Got new page
 				myMsgGet(qid[0], &rcvMsg, HD_ACK);
+
 				pagesUp();
 				if (buffer[0]-'0' == PROC_WRITE_REQ){
 					usleep(MEM_WR_T/(double)1000);

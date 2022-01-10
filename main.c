@@ -91,7 +91,8 @@ typedef struct msgbuf{
     char mtext;
 } msgbuf;
 
-
+//full == all pages are valid
+// empty == all the pages are invalid
 pthread_mutex_t memMutex;
 typedef struct memory{
     int validArr[N];
@@ -100,6 +101,7 @@ typedef struct memory{
     int size;
 } memory;
 memory mmuMemory;
+
 //                                   S + size
 //                         | UNUSED  |   USED
 //                    ---->|         |------------------------->
@@ -126,6 +128,7 @@ void initSystem();
 void killAllProc();
 void printerThr();
 void evictorThr();
+void constructAMessage(msgbuf* msg, int srcMbx, int mType, char mText);
 //////////////////////////////// prototypes ////////////////////////////////
 
 key_t mailBoxes[PROC_NUMBER+1];
@@ -296,13 +299,20 @@ void user_proc(int id){
         myMsgGet(id,&rx, 1);
     }
 }
+void constructAMessage(msgbuf* msg, int srcMbx, int mType, char mText){
+    msg->mtext=mText;
+    msg->mtype = mType;
+    msg->srcMbx=srcMbx;
+}
 // The Hard Disk processes responsible for simulating the mechanisms of a hard disk by wasting time
+
 int HD() {
 
     msgbuf tx, rx;
-    tx.mtype = 1;
+/*    tx.mtype = 1;
     tx.srcMbx = HD_IDX;
-    tx.mtext = 'A';
+    tx.mtext = 'A';*/
+    constructAMessage(&tx, HD_IDX, HD_IDX, 'A');
 
     while (TRUE) {
         // RECEIVE REQUEST
@@ -318,13 +328,90 @@ int HD() {
 int MMU(){
     printf("hi Im MMU!\n");
     msgbuf rxMsg, txMsg;
-    txMsg.mtype = 1;
-    txMsg.mtext = 'A';
-    txMsg.srcMbx = MMU_IDX;
-    while (myMsgGet(MMU_IDX, &rxMsg, 1))
-    {
+    int randPage;
+    int currMemSize;
 
+
+    while (TRUE)
+    {
+        // type is 1 == from a process
+
+        myMsgGet(MMU_IDX, &rxMsg, 1);
+
+        myMutexLock(&memMutex, MMU_IDX);
+        currMemSize = mmuMemory.size;
+        pthread_mutex_unlock(&memMutex);
+
+        if (currMemSize==0)
+            state = MISS;
+        else
+            state = rand() % 100 < HIT_RATE_IN_PERCENTS? HIT : MISS;
+
+
+        if (state==HIT){
+
+            txMsg.mtype = 1;
+            txMsg.mtext = 'A';
+            txMsg.srcMbx = MMU_IDX;
+            if (rxMsg.mtext == WRITE)
+            {
+                usleep(MEM_WR_T/(double)1000);
+
+                myMutexLock(&memMutex, MMU_IDX);
+                randPage = (mmuMemory.start + ((int)rand()%mmuMemory.size)) % N;
+                mmuMemory.dirtyArr[randPage] = DIRTY;
+
+                pthread_mutex_unlock(&memMutex);
+            }
+            // SEND ACK TO THE PROCESS
+            myMsgSend(rxMsg.srcMbx, &txMsg);
+        }
+        else // ITS A MISS
+        {
+            myMutexLock(&memMutex, MMU_IDX);
+            currMemSize = mmuMemory.size;
+            pthread_mutex_unlock(&memMutex);
+
+            if (currMemSize==N) {
+                // RAISE THE EVICTOR
+                myMutexLock(&evictCondMut, MMU_IDX);
+                state = EVICT_STATE;
+                pthread_cond_signal(&condEvict);
+                pthread_mutex_unlock(&evictCondMut);
+
+                // WAIT FOR THE EVICTOR TO FINISH
+                myMutexLock(&evictCondMut, MMU_IDX);
+                while (state != MMU_STATE)
+                    pthread_cond_wait(&condMmu, &evictCondMut);
+
+                pthread_mutex_unlock(&evictCondMut);
+            }
+            constructAMessage(&txMsg, MMU_IDX,HD_IDX, 'A');
+            // Send a request to HD
+            myMsgSend(HD_IDX,&txMsg);
+
+            myMsgGet(MMU_IDX,&rxMsg,HD_IDX);
+
+            // NOW ITS HIT
+            txMsg.mtype = 1;
+            txMsg.mtext = 'A';
+            txMsg.srcMbx = MMU_IDX;
+            if (rxMsg.mtext == WRITE)
+            {
+                usleep(MEM_WR_T/(double)1000);
+
+                myMutexLock(&memMutex, MMU_IDX);
+                randPage = (mmuMemory.start + ((int)rand()%mmuMemory.size)) % N;
+                mmuMemory.dirtyArr[randPage] = DIRTY;
+
+                pthread_mutex_unlock(&memMutex);
+            }
+            // SEND ACK TO THE PROCESS
+            myMsgSend(rxMsg.srcMbx, &txMsg);
+
+        }
     }
+
     exit(1);
 }
 
@@ -337,7 +424,7 @@ void evictorThr(){
     int first_eviction = TRUE;
     while (1){
         // wait for your turn
-        myMutexLock(&evictCondMut,EVICTOR_IDX);
+        myMutexLock(&evictCondMut, EVICTOR_IDX);
         while (state != EVICT_STATE)
             pthread_cond_wait(&condEvict, &evictCondMut);
         pthread_mutex_unlock(&evictCondMut);
