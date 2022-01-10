@@ -69,6 +69,8 @@
 # define HD_IDX 3
 # define TIMER_IDX 4
 # define MAIN_IDX 5
+# define PRINTER_IDX 6
+# define EVICTOR_IDX 7
 
 
 
@@ -90,10 +92,19 @@ typedef struct msgbuf{
 } msgbuf;
 
 
+pthread_mutex_t memMutex;
+typedef struct memory{
+    int validArr[N];
+    int dirtyArr[N];
+} memory;
+
+
 //////////////////////////////// prototypes ////////////////////////////////
 int myMsgGet(int mailBoxId, msgbuf* rxMsg);
 int user_proc(int id);
 int myMsgSend(int msqid, const msgbuf*msgp);
+int myMutexLock(pthread_mutex_t* mutex,int self_id);
+
 int sendStopSim(int id,int reason);
 int MMU();
 void timer();
@@ -121,17 +132,19 @@ void closeSystem() {
 
 void killAllProc(){
     int i;
-    for(i=0;i<5;i++){
-        msgctl(processLst[i],IPC_RMID,NULL);
-        if (i<4)
-            // do not kill the main process.
-            kill(processLst[i], SIGKILL);
+    // we do not kill the main process here.
+    for(i=0;i<PROC_NUMBER;i++){
+        msgctl(mailBoxes[i],IPC_RMID,NULL);
+        kill(processLst[i], SIGKILL);
     }
+    // close the main mailbox
+    msgctl(mailBoxes[MAIN_IDX],IPC_RMID,NULL);
 }
 
 void initSystem() {
     int i, j;
 
+    // open a mailbox for every process including main
     for (i=0;i<PROC_NUMBER+1;i++){
         if ((mailBoxes[i] = msgget(BASE_KEY+i, 0600 | IPC_CREAT)) == -1)
         {
@@ -140,6 +153,8 @@ void initSystem() {
                 msgctl(mailBoxes[j],IPC_RMID,NULL);
         }
     }
+
+    // open the processes
     for (i=0;i<PROC_NUMBER;i++){
         processLst[i] = fork();
         if (processLst[i]<0)
@@ -239,7 +254,15 @@ int MMU(){
         }
     }
     exit(1);
+}
 
+void printer_thr(){
+    printf("Hi I'm the Printer\n");
+
+    while(TRUE){
+        myMutexLock(&memMutex,PRINTER_IDX);
+        usleep(TIME_BETWEEN_SNAPSHOTS/(double)1000);
+    }
 }
 
 int myMsgGet(int mailBoxId, msgbuf* rxMsg){
@@ -265,10 +288,10 @@ int myMsgSend(int mailBoxId, const msgbuf* msgp){
     return res;
 }
 
-// this is a wrapper for the try lock that makes sure the return value of the lock is okay and if not it closes the car
-int myTryMutexLock(pthread_mutex_t* mutex,int self_id) {
+// this is a wrapper for the lock that makes sure the return value of the lock is okay and if not it closes the system
+int myMutexLock(pthread_mutex_t* mutex,int self_id) {
     int res;
-    res = pthread_mutex_trylock(mutex);
+    res = pthread_mutex_lock(mutex);
     if (res == 0) {
         return 0;
     }
