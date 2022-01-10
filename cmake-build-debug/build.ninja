@@ -74,7 +74,7 @@ build cmake_object_order_depends_target_OperatingSystems: phony || CMakeFiles/Op
 
 build CMakeFiles/OperatingSystems.dir/main.c.o: C_COMPILER__OperatingSystems_Debug /home/tomer/Documents/operating_systems/OperatingSystems/main.c || cmake_object_order_depends_target_OperatingSystems
   DEP_FILE = CMakeFiles/OperatingSystems.dir/main.c.o.d
-  FLAGS = -g -std=gnu11
+  FLAGS = -pthread -g -std=gnu11
   OBJECT_DIR = CMakeFiles/OperatingSystems.dir
   OBJECT_FILE_DIR = CMakeFiles/OperatingSystems.dir
 
@@ -87,7 +87,7 @@ build CMakeFiles/OperatingSystems.dir/main.c.o: C_COMPILER__OperatingSystems_Deb
 # Link the executable OperatingSystems
 
 build OperatingSystems: C_EXECUTABLE_LINKER__OperatingSystems_Debug CMakeFiles/OperatingSystems.dir/main.c.o
-  FLAGS = -g
+  FLAGS = -pthread -g
   OBJECT_DIR = CMakeFiles/OperatingSystems.dir
   POST_BUILD = :
   PRE_LINK = :

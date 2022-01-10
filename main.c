@@ -100,12 +100,16 @@ typedef struct memory{
     int size;
 } memory;
 memory mmuMemory;
-//                                   S+ used
-//                                   |   USED    |
+//                                   S + size
+//                         | UNUSED  |   USED
 //                    ---->|         |------------------------->
 //                    ------------------------------------------
 
+// condition variable and mutex for switching control between the mmu and the evictor.
 pthread_mutex_t evictCondMut;
+enum { MMU_STATE, EVICT_STATE } state = MMU_STATE;
+pthread_cond_t      condMmu = PTHREAD_COND_INITIALIZER;
+pthread_cond_t      condEvict = PTHREAD_COND_INITIALIZER;
 
 //////////////////////////////// prototypes ////////////////////////////////
 int myMsgGet(int mailBoxId, msgbuf* rxMsg, int msgType);
@@ -321,6 +325,34 @@ int MMU(){
     exit(1);
 }
 void evictorThr(){
+    msgbuf hdRxMsg,hdTxMsg;
+    hdTxMsg.mtype  = HD_IDX; // we have a special type for the HD
+    hdTxMsg.srcMbx = EVICTOR_IDX;
+    hdTxMsg.mtext = 'A';
+    while (1){
+        // wait for your turn
+        myMutexLock(&evictCondMut,EVICTOR_IDX);
+        while (state != EVICT_STATE)
+            pthread_cond_wait(&condEvict, &evictCondMut);
+        pthread_mutex_unlock(&evictCondMut);
+
+        // we have awoken! start the cleansing!
+        myMutexLock(&memMutex,EVICTOR_IDX);
+        while(mmuMemory.size > USED_SLOTS_TH){
+            // we need to synchronize the HD with the dirty page
+            if (mmuMemory.dirtyArr[mmuMemory.start] == 1){
+                mmuMemory.dirtyArr[mmuMemory.start] = 0;
+                // send a request for the hard disk
+                myMsgSend(HD_IDX,&hdTxMsg);
+                // wait for ack from the hard disk
+                myMsgGet(HD_IDX,&hdRxMsg,1);
+            }
+            mmuMemory.validArr[mmuMemory.start] = 0;
+            mmuMemory.start = (mmuMemory.start+1) % N;
+        }
+        pthread_mutex_unlock(&memMutex);
+
+    }
 
 }
 
@@ -343,8 +375,8 @@ void printerThr(){
     }
 }
 
-int myMsgGet(int mailBoxId, msgbuf* rxMsg, int msgType){
 
+int myMsgGet(int mailBoxId, msgbuf* rxMsg, int msgType){
     int res;
     if((res = msgrcv(mailBoxes[mailBoxId] , rxMsg, sizeof(msgbuf) - sizeof(long), msgType,0)) == -1){
         perror("MESSAGE RECEIVE ERROR");
