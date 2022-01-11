@@ -27,7 +27,7 @@
 #define WR_RATE_IN_PERCENTS			WR_RATE*100
 
 /// Times
-#define SIM_T 					3			//in seconds
+#define SIM_T 					600			//in seconds
 #define TIME_BETWEEN_SNAPSHOTS 	200000000 	//in ns
 #define MEM_WR_T 				10			//in ns
 #define HD_ACCS_T 				10000000	//in ns
@@ -247,15 +247,15 @@ void initSystem() {
         killAllProc();
         exit(1);
     }
-    if((pthread_create(&threadLst[2], NULL, (void*)printerThr, NULL))){
-        printf("Printer Thread Failed to open!\n");
-        pthread_cancel(threadLst[0]);
-        pthread_cancel(threadLst[1]);
-        pthread_mutex_destroy(&evictCondMut);
-        pthread_mutex_destroy(&memMutex);
-        killAllProc();
-        exit(1);
-    }
+//    if((pthread_create(&threadLst[2], NULL, (void*)printerThr, NULL))){
+//        printf("Printer Thread Failed to open!\n");
+//        pthread_cancel(threadLst[0]);
+//        pthread_cancel(threadLst[1]);
+//        pthread_mutex_destroy(&evictCondMut);
+//        pthread_mutex_destroy(&memMutex);
+//        killAllProc();
+//        exit(1);
+//    }
 }
 // The starting point of the code and also the main proccess responsible for opening all other procs and threads
 // and in the case one of them failes or the time runs out he also closes the system.
@@ -264,7 +264,7 @@ int main() {
     signal(SIGKILL, sig_handler); // Register signal handler
     signal(SIGTERM, sig_handler); // Register signal handler
     initSystem();
-    myMsgReceive(MAIN_IDX, &return_msg, 1);
+    msgrcv(mailBoxes[MAIN_IDX], &return_msg,sizeof(msgbuf) - sizeof(long), 1,0);
     closeSystem();
     printf("closing system\n");
     printf("closed by: %d for reason: %d", return_msg.srcMbx,return_msg.mtext);
@@ -331,9 +331,13 @@ int MMU(){
 
     while (TRUE)
     {
+        printf("waiting for messages\n");
         // type is 1 == from a process
         myMsgReceive(MMU_IDX, &rxMsg, 1);
         ReadWriteType = rxMsg.mtext;
+
+        printf("MMU received message from %d type %s\n",rxMsg.srcMbx,(rxMsg.mtext == WRITE) ? ("write"):("read"));
+        fflush(stdout);
 
         myMutexLock(&memMutex, MMU_IDX);
 
@@ -346,7 +350,7 @@ int MMU(){
             missHitStatus = MISS;
         else
             missHitStatus = rand() % 100 < HIT_RATE_IN_PERCENTS? HIT : MISS;
-
+        printf("");
         if (missHitStatus==HIT){
             constructAMessage(&txMsg, MMU_IDX, 1, 'A');
 
