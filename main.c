@@ -136,7 +136,7 @@ pthread_t threadLst[THR_NUM];
 
 
 void sig_handler(int signum){
-    printf("caught signal %d", signum);
+//    printf("caught signal %d", signum);
     closeSystem();
 }
 
@@ -252,15 +252,17 @@ int main() {
     initSystem();
     msgrcv(mailBoxes[MAIN_IDX], &return_msg,sizeof(msgbuf) - sizeof(long), 1,0);
     closeSystem();
-    printf("closing system\n");
-    printf("closed by: %d for reason: %d", return_msg.srcMbx,return_msg.mtext);
+//    printf("closing system\n");
+//    printf("closed by: %d for reason: %d", return_msg.srcMbx,return_msg.mtext);
     return 0;
 }
 
 
-// the function responsible for the consumer processes
+/*
+ * the function responsible for the consumer processes
+ */
 void user_proc(int id){
-    printf("Hi I'm User %d\n", id);
+//    printf("Hi I'm User %d\n", id);
     float writeProb = 0;
     msgbuf tx,rx;
     tx.mtype = 1; // general type
@@ -273,7 +275,7 @@ void user_proc(int id){
         } else { // read
             tx.mtext = READ;
         }
-        printf("user id = %d->MMU\n",id);
+//        printf("user id = %d->MMU\n",id);
         // send request to the MMU
         myMsgSend(MMU_IDX,&tx);
         // wait for ack
@@ -308,7 +310,7 @@ int HD() {
 
 // Responsible for the managment of the memory unit
 int MMU(){
-    printf("hi Im MMU!\n");
+//    printf("hi Im MMU!\n");
     msgbuf rxMsg, txMsg;
     int randPage, nextPage;
     int currMemSize;
@@ -318,7 +320,7 @@ int MMU(){
 
     while (TRUE)
     {
-        printf("waiting for messages\n");
+//        printf("waiting for messages\n");
 
         // type is 1 == from a process
 
@@ -340,7 +342,7 @@ int MMU(){
         else
             missHitStatus = rand() % 100 < HIT_RATE_IN_PERCENTS? HIT : MISS;
         pthread_mutex_unlock(&memMutex);
-        printf("MMU message from %d type %s was a %s\n",rxMsg.srcMbx,(rxMsg.mtext == WRITE) ? ("write"):("read"),(missHitStatus)?("HIT"):("MISS"));
+//        printf("MMU message from %d type %s was a %s\n",rxMsg.srcMbx,(rxMsg.mtext == WRITE) ? ("write"):("read"),(missHitStatus)?("HIT"):("MISS"));
         fflush(stdout);
         if (missHitStatus==HIT){
             constructAMessage(&txMsg, MMU_IDX, 1, 'A');
@@ -365,7 +367,7 @@ int MMU(){
             pthread_mutex_unlock(&memMutex);
 
             if (currMemSize==N) {
-                printf("MMU calling the evictor\n");
+//                printf("MMU calling the evictor\n");
                 // RAISE THE EVICTOR FROM HELL
                 myMutexLock(&evictCondMut, MMU_IDX);
                 state = EVICT_STATE;
@@ -407,7 +409,9 @@ int MMU(){
     exit(1);
 }
 
-// The evictor Thread wakes up to clean and free the memory and then sends back the control to the MMU
+/*
+ * The evictor Thread wakes up to clean and free the memory and then sends back the control to the MMU
+ */
 void evictorThr(){
     msgbuf hdRxMsg,hdTxMsg;
     int first_eviction = TRUE;
@@ -423,11 +427,10 @@ void evictorThr(){
 
         // we have awoken! start the cleansing!
         myMutexLock(&memMutex,EVICTOR_IDX);
-        printf("EVICTOR IS ACTIVE\n");
-        printf("start index %d\n", mmuMemory.start);
+//        printf("EVICTOR IS ACTIVE\n");
         fflush(stdout);
         while(mmuMemory.size > USED_SLOTS_TH){
-            printf("EVICTOR CLEANING MEM %s\n",(mmuMemory.dirtyArr[mmuMemory.start])?("DIRTY"):(""));
+//            printf("EVICTOR CLEANING MEM %s\n",(mmuMemory.dirtyArr[mmuMemory.start])?("DIRTY"):(""));
             // we need to synchronize the HD with the dirty page
             if (mmuMemory.dirtyArr[mmuMemory.start] == 1){
 
@@ -471,15 +474,21 @@ void evictorThr(){
 
 }
 
-// The printer Thread prints checkpoints of the memory every TIME_BETWEEN_SNAPSHOTS[ns]
+/*
+ * The printer Thread prints checkpoints of the memory every TIME_BETWEEN_SNAPSHOTS[ns]
+ */
 void printerThr(){
-    printf("Hi I'm the Printer\n");
+//    printf("Hi I'm the Printer\n");
     while(TRUE){
 
         printfunc();
         usleep(TIME_BETWEEN_SNAPSHOTS/(double)1000);
     }
 }
+/*
+ * The print function is the printers logic.
+ * it is seperated so that we can use it to debug easily.
+ */
 void printfunc(){
     memory memCopy;
     int i=0;
@@ -513,7 +522,11 @@ int myMsgReceive(int mailBoxId, msgbuf* rxMsg, int msgType){
     }
     return TRUE;
 }
-
+/*
+ * This is a wrapper to the msgsend function
+ * in case of a failure a message is sent to the main process
+ * in order to close the system.
+ */
 int myMsgSend(int mailBoxId, const msgbuf* msgp){
     int res;
 
@@ -524,7 +537,9 @@ int myMsgSend(int mailBoxId, const msgbuf* msgp){
     return res;
 }
 
-// this is a wrapper for the lock that makes sure the return value of the lock is okay and if not it closes the system
+/*
+ * this is a wrapper for the lock that makes sure the return value of the lock is okay and if not it closes the system
+ */
 int myMutexLock(pthread_mutex_t* mutex,int self_id) {
     int res;
     res = pthread_mutex_lock(mutex);
@@ -538,25 +553,34 @@ int myMutexLock(pthread_mutex_t* mutex,int self_id) {
     sendStopSim(self_id,MUTEX_LOCK_FAILED);
 }
 
-
+/*
+ * Send_stop_sim sends a message to the main process noting him that a critical failure has happend
+ * which causes the whole system to close. this is also used in normal scenarios such as when the
+ * timer finishes simulation.
+ */
 int sendStopSim(int id,int reason){
     msgbuf data;
     data.mtype = 1;
     data.srcMbx = id;
     data.mtext = reason;
-    printf("STOP SIM, id = %d, reason= %d\n",id, reason);
+//    printf("STOP SIM, id = %d, reason= %d\n",id, reason);
     // send message to main to stop simulation
     msgsnd(mailBoxes[MAIN_IDX], &data,0, 0);
     exit(reason);
 }
+/*
+ * The timer process. it's whole purpose is to go to sleep and wake up when the simulation is over
+ * waking the main process and telling it to shut the system down.
+ */
 void timer(){
-    printf("hi Im Timer!\n");
+//    printf("hi Im Timer!\n");
     sleep(SIM_T);
-    printf("times up!\n");
+//    printf("times up!\n");
     sendStopSim(TIMER_IDX,0);
 }
-// a wrapper to the msgget function which other than getting the requested mailbox also flushes it from any existing
-// messages
+/* a wrapper to the msgget function which other than getting the requested mailbox
+ * also flushes it from any existing messages.
+ */
 int init_mailbox(int key){
     int mailbox;
     int sizeOfMsg = sizeof(msgbuf)-sizeof(long);
@@ -567,7 +591,7 @@ int init_mailbox(int key){
 
     // flush mailbox
     while(msgrcv(mailbox, &tempMsg, sizeOfMsg , 0 , IPC_NOWAIT) != -1){
-        printf("FLUSH CLEANED MESSAGE from mailbox id = %d\n",key-BASE_KEY);
+//        printf("FLUSH CLEANED MESSAGE from mailbox id = %d\n",key-BASE_KEY);
     }
 
     // test the stop reason to make sure we stoped flushing because the mailbox is empty
