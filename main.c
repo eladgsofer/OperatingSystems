@@ -13,9 +13,10 @@
 #define HIT_RATE 					0.5
 #define HIT_RATE_IN_PERCENTS 		HIT_RATE*100
 #define WR_RATE 					0.7
-// in [s]
+// SIM_T in [s]
 #define SIM_T 					20
-// In [nS]
+
+// ALL THE TIMERS HERE ARE IN [nS]
 #define TIME_BETWEEN_SNAPSHOTS 	200000000
 #define MEM_WR_T 				10
 #define HD_ACCS_T 				10000000
@@ -176,12 +177,13 @@ void initSystem() {
     for (i=0;i<PROC_NUMBER;i++){
         processLst[i] = fork();
         if (processLst[i]<0){
-            // Roll back
+            // Roll back - clean all the processes until now since an error occured.
             for(j=i;j>=0;j--){
                 kill(processLst[j], SIGKILL);
             }
             printf("Fork failed rolling back system\n");
             killMB();
+            // and quit since there is a failure
             exit(1);
         } else if (processLst[i]==0){
             switch (i) {
@@ -246,10 +248,13 @@ int main() {
 }
 
 
-/*
- * the function responsible for the consumer processes
- */
+
 void user_proc(int id){
+
+    /*
+    * the function responsible for the consumer processes
+    */
+
     float writeProb = 0;
     msgbuf tx,rx;
     tx.mtype = 1; // general type
@@ -520,12 +525,13 @@ int myMsgReceive(int mailBoxId, msgbuf* rxMsg, int msgType){
     }
     return TRUE;
 }
-/*
- * This is a wrapper to the msgsend function
- * in case of a failure a message is sent to the main process
- * in order to close the system.
- */
+
 int myMsgSend(int mailBoxId, const msgbuf* msgp){
+    /*
+     * This is a wrapper to the msgsend function
+     * in case of a failure a message is sent to the main process
+     * in order to close the system.
+     */
     int res;
 
     res = msgsnd(mailBoxes[mailBoxId],msgp,sizeof(msgbuf) - sizeof(long) ,0);
@@ -535,10 +541,11 @@ int myMsgSend(int mailBoxId, const msgbuf* msgp){
     return res;
 }
 
-/*
- * this is a wrapper for the lock that makes sure the return value of the lock is okay and if not it closes the system
- */
+
 int myMutexLock(pthread_mutex_t* mutex,int self_id) {
+    /*
+     * this is a wrapper for the lock that makes sure the return value of the lock is okay and if not it closes the system
+     */
     int res;
     res = pthread_mutex_lock(mutex);
     if (res == 0) {
@@ -549,14 +556,16 @@ int myMutexLock(pthread_mutex_t* mutex,int self_id) {
     }
     // if we reached here then the lock failed
     sendStopSim(self_id,MUTEX_LOCK_FAILED);
+    return 1;
 }
 
-/*
- * Send_stop_sim sends a message to the main process noting him that a critical failure has happend
- * which causes the whole system to close. this is also used in normal scenarios such as when the
- * timer finishes simulation.
- */
+
 int sendStopSim(int id,int reason){
+    /*
+     * Send_stop_sim sends a message to the main process noting him that a critical failure has happend
+     * which causes the whole system to close. this is also used in normal scenarios such as when the
+     * timer finishes simulation.
+     */
     msgbuf data;
     data.mtype = 1;
     data.srcMbx = id;
@@ -565,18 +574,21 @@ int sendStopSim(int id,int reason){
     msgsnd(mailBoxes[MAIN_IDX], &data,0, 0);
     exit(reason);
 }
-/*
- * The timer process. it's whole purpose is to go to sleep and wake up when the simulation is over
- * waking the main process and telling it to shut the system down.
- */
+
 void timer(){
+    /*
+     * The timer process. it's whole purpose is to go to sleep and wake up when the simulation is over
+     * waking the main process and telling it to shut the system down.
+     */
+
     sleep(SIM_T);
     sendStopSim(TIMER_IDX,0);
 }
-/* a wrapper to the msgget function which other than getting the requested mailbox
- * also flushes it from any existing messages.
- */
+
 int init_mailbox(int key){
+    /* a wrapper to the msgget function which other than getting the requested mailbox
+     * also flushes it from any existing messages.
+     */
     int mailbox;
     int sizeOfMsg = sizeof(msgbuf)-sizeof(long);
     msgbuf tempMsg;
