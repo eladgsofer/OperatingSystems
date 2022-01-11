@@ -331,12 +331,14 @@ int MMU(){
     int randPage, nextPage;
     int currMemSize;
     int currProcessId;
+    int missHitStatus, ReadWriteType;
 
 
     while (TRUE)
     {
         // type is 1 == from a process
         myMsgReceive(MMU_IDX, &rxMsg, 1);
+        ReadWriteType = rxMsg.mtext;
 
         myMutexLock(&memMutex, MMU_IDX);
 
@@ -346,20 +348,20 @@ int MMU(){
         currProcessId = rxMsg.srcMbx;
 
         if (currMemSize==0)
-            state = MISS;
+            missHitStatus = MISS;
         else
-            state = rand() % 100 < HIT_RATE_IN_PERCENTS? HIT : MISS;
+            missHitStatus = rand() % 100 < HIT_RATE_IN_PERCENTS? HIT : MISS;
 
-        if (state==HIT){
+        if (missHitStatus==HIT){
             constructAMessage(&txMsg, MMU_IDX, 1, 'A');
 
-            if (rxMsg.mtext == WRITE)
+            if (ReadWriteType == WRITE)
             {
                 usleep(MEM_WR_T/(double)1000);
 
                 myMutexLock(&memMutex, MMU_IDX);
                 randPage = (mmuMemory.start + ((int)rand()%mmuMemory.size)) % N;
-                mmuMemory.dirtyArr[randPage] = DIRTY;
+                mmuMemory.dirtyArr[randPage] = TRUE;
                 pthread_mutex_unlock(&memMutex);
             }
 
@@ -392,19 +394,22 @@ int MMU(){
             // The memory is not full, and now it's a hit since the page is inside.
             usleep(MEM_WR_T/(double)1000);
 
-            // Now its a HIT
+            /// Memory access - now its a hit
             myMutexLock(&memMutex, MMU_IDX);
 
             nextPage = (mmuMemory.start + mmuMemory.size) % N;
-            mmuMemory.dirtyArr[nextPage] = DIRTY;
-            mmuMemory.validArr[nextPage] = VALID;
+            if (ReadWriteType == WRITE){
+                mmuMemory.dirtyArr[nextPage] = TRUE;
+            }
+
+            mmuMemory.validArr[nextPage] = TRUE;
             mmuMemory.size++;
+
             pthread_mutex_unlock(&memMutex);
 
             // SEND ACK TO THE PROCESS
             constructAMessage(&txMsg, MMU_IDX, 1, 'A');
             myMsgSend(MMU_IDX, &txMsg);
-
         }
     }
 
