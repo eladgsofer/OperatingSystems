@@ -114,7 +114,7 @@ pthread_cond_t      condMmu = PTHREAD_COND_INITIALIZER;
 pthread_cond_t      condEvict = PTHREAD_COND_INITIALIZER;
 
 //////////////////////////////// prototypes ////////////////////////////////
-int myMsgGet(int mailBoxId, msgbuf* rxMsg, int msgType);
+int myMsgReceive(int mailBoxId, msgbuf* rxMsg, int msgType);
 void user_proc(int id);
 int myMsgSend(int mailBoxId, const msgbuf* msgp);
 int myMutexLock(pthread_mutex_t* mutex,int self_id);
@@ -269,7 +269,7 @@ int main() {
     signal(SIGKILL, sig_handler); // Register signal handler
     signal(SIGTERM, sig_handler); // Register signal handler
     initSystem();
-    myMsgGet(MAIN_IDX, &return_msg, 1);
+    myMsgReceive(MAIN_IDX, &return_msg, 1);
     closeSystem();
     printf("closing system\n");
     printf("closed by: %d for reason: %d", return_msg.srcMbx,return_msg.mtext);
@@ -296,7 +296,7 @@ void user_proc(int id){
         // send request to the MMU
         myMsgSend(MMU_IDX,&tx);
         // wait for ack
-        myMsgGet(id,&rx, 1);
+        myMsgReceive(id, &rx, 1);
     }
 }
 void constructAMessage(msgbuf* msg, int srcMbx, int mType, char mText){
@@ -316,7 +316,7 @@ int HD() {
 
     while (TRUE) {
         // RECEIVE REQUEST
-        myMsgGet(HD_IDX, &rx, 1);
+        myMsgReceive(HD_IDX, &rx, 1);
         // PROCESS
         usleep(HD_ACCS_T/(double)1000);
         // SEND ACK
@@ -328,31 +328,31 @@ int HD() {
 int MMU(){
     printf("hi Im MMU!\n");
     msgbuf rxMsg, txMsg;
-    int randPage;
+    int randPage, nextPage;
     int currMemSize;
+    int currProcessId;
 
 
     while (TRUE)
     {
         // type is 1 == from a process
-
-        myMsgGet(MMU_IDX, &rxMsg, 1);
+        myMsgReceive(MMU_IDX, &rxMsg, 1);
 
         myMutexLock(&memMutex, MMU_IDX);
+
+        // Copy the memory size
         currMemSize = mmuMemory.size;
         pthread_mutex_unlock(&memMutex);
+        currProcessId = rxMsg.srcMbx;
 
         if (currMemSize==0)
             state = MISS;
         else
             state = rand() % 100 < HIT_RATE_IN_PERCENTS? HIT : MISS;
 
-
         if (state==HIT){
+            constructAMessage(&txMsg, MMU_IDX, 1, 'A');
 
-            txMsg.mtype = 1;
-            txMsg.mtext = 'A';
-            txMsg.srcMbx = MMU_IDX;
             if (rxMsg.mtext == WRITE)
             {
                 usleep(MEM_WR_T/(double)1000);
@@ -360,20 +360,16 @@ int MMU(){
                 myMutexLock(&memMutex, MMU_IDX);
                 randPage = (mmuMemory.start + ((int)rand()%mmuMemory.size)) % N;
                 mmuMemory.dirtyArr[randPage] = DIRTY;
-
                 pthread_mutex_unlock(&memMutex);
             }
+
             // SEND ACK TO THE PROCESS
-            myMsgSend(rxMsg.srcMbx, &txMsg);
+            myMsgSend(currProcessId, &txMsg);
         }
         else // ITS A MISS
         {
-            myMutexLock(&memMutex, MMU_IDX);
-            currMemSize = mmuMemory.size;
-            pthread_mutex_unlock(&memMutex);
-
             if (currMemSize==N) {
-                // RAISE THE EVICTOR
+                // RAISE THE EVICTOR FROM HELL
                 myMutexLock(&evictCondMut, MMU_IDX);
                 state = EVICT_STATE;
                 pthread_cond_signal(&condEvict);
@@ -386,28 +382,28 @@ int MMU(){
 
                 pthread_mutex_unlock(&evictCondMut);
             }
-            constructAMessage(&txMsg, MMU_IDX,HD_IDX, 'A');
+
+            constructAMessage(&txMsg, MMU_IDX, HD_IDX, 'A');
             // Send a request to HD
-            myMsgSend(HD_IDX,&txMsg);
+            myMsgSend(HD_IDX, &txMsg);
+            // Wait for an ACK from the HD to retrieve the page
+            myMsgReceive(MMU_IDX, &rxMsg, HD_IDX);
 
-            myMsgGet(MMU_IDX,&rxMsg,HD_IDX);
+            // The memory is not full, and now it's a hit since the page is inside.
+            usleep(MEM_WR_T/(double)1000);
 
-            // NOW ITS HIT
-            txMsg.mtype = 1;
-            txMsg.mtext = 'A';
-            txMsg.srcMbx = MMU_IDX;
-            if (rxMsg.mtext == WRITE)
-            {
-                usleep(MEM_WR_T/(double)1000);
+            // Now its a HIT
+            myMutexLock(&memMutex, MMU_IDX);
 
-                myMutexLock(&memMutex, MMU_IDX);
-                randPage = (mmuMemory.start + ((int)rand()%mmuMemory.size)) % N;
-                mmuMemory.dirtyArr[randPage] = DIRTY;
+            nextPage = (mmuMemory.start + mmuMemory.size) % N;
+            mmuMemory.dirtyArr[nextPage] = DIRTY;
+            mmuMemory.validArr[nextPage] = VALID;
+            mmuMemory.size++;
+            pthread_mutex_unlock(&memMutex);
 
-                pthread_mutex_unlock(&memMutex);
-            }
             // SEND ACK TO THE PROCESS
-            myMsgSend(rxMsg.srcMbx, &txMsg);
+            constructAMessage(&txMsg, MMU_IDX, 1, 'A');
+            myMsgSend(MMU_IDX, &txMsg);
 
         }
     }
@@ -441,7 +437,7 @@ void evictorThr(){
                 pthread_mutex_unlock(&memMutex);
                 // send a request for the hard disk and wait for ack
                 myMsgSend(HD_IDX,&hdTxMsg);
-                myMsgGet(HD_IDX,&hdRxMsg,HD_IDX);
+                myMsgReceive(HD_IDX, &hdRxMsg, HD_IDX);
                 // hard disk finished take back the control
                 myMutexLock(&memMutex,EVICTOR_IDX);
             }
@@ -449,7 +445,7 @@ void evictorThr(){
             mmuMemory.validArr[mmuMemory.start] = 0;
             mmuMemory.size -= 1;
             // cyclic FIFO eviction
-            mmuMemory.start = (mmuMemory.start+1) % N;
+            mmuMemory.start = (mmuMemory.start + 1) % N;
 
             // give back the control to the MMU after the first eviction
             if (first_eviction) {
@@ -457,13 +453,10 @@ void evictorThr(){
                 state = MMU_STATE;
                 pthread_cond_signal(&condMmu);
                 pthread_mutex_unlock(&evictCondMut);
-
                 first_eviction = FALSE;
             }
         }
         pthread_mutex_unlock(&memMutex);
-
-
     }
 
 }
@@ -497,16 +490,14 @@ void printerThr(){
 }
 
 
-int myMsgGet(int mailBoxId, msgbuf* rxMsg, int msgType){
-    int res;
-    if((res = msgrcv(mailBoxes[mailBoxId] , rxMsg, sizeof(msgbuf) - sizeof(long), msgType,0)) == -1){
+int myMsgReceive(int mailBoxId, msgbuf* rxMsg, int msgType){
+    if((msgrcv(mailBoxes[mailBoxId] , rxMsg, sizeof(msgbuf) - sizeof(long), msgType,0)) == -1){
         perror("MESSAGE RECEIVE ERROR");
         printf("RECEIVE ERROR TO ID = %d",mailBoxId);
         sendStopSim(mailBoxId, RECV_FAILED);
         return FALSE;
     }
     return TRUE;
-
 }
 
 int myMsgSend(int mailBoxId, const msgbuf* msgp){
