@@ -27,7 +27,7 @@
 #define WR_RATE_IN_PERCENTS			WR_RATE*100
 
 /// Times
-#define SIM_T 					600			//in seconds
+#define SIM_T 					6			//in seconds
 #define TIME_BETWEEN_SNAPSHOTS 	200000000 	//in ns
 #define MEM_WR_T 				10			//in ns
 #define HD_ACCS_T 				10000000	//in ns
@@ -122,6 +122,8 @@ void initSystem();
 void killAllProc();
 void printerThr();
 void evictorThr();
+
+void printfunc();
 void constructAMessage(msgbuf* msg, int srcMbx, int mType, char mText);
 //////////////////////////////// prototypes ////////////////////////////////
 
@@ -311,8 +313,10 @@ int HD() {
 
     while (TRUE) {
         // RECEIVE REQUEST
-        myMsgReceive(HD_IDX, &rx, 1);
+        myMsgReceive(HD_IDX, &rx, HD_IDX);
         // PROCESS
+        printf("HD received messages\n");
+        fflush(stdout);
         usleep(HD_ACCS_T/(double)1000);
         // SEND ACK
         myMsgSend(rx.srcMbx, &tx);
@@ -332,25 +336,34 @@ int MMU(){
     while (TRUE)
     {
         printf("waiting for messages\n");
+        myMutexLock(&memMutex, MMU_IDX);
+        printf("MMU begining size %d\n",mmuMemory.size);
+        pthread_mutex_unlock(&memMutex);
         // type is 1 == from a process
+
         myMsgReceive(MMU_IDX, &rxMsg, 1);
+
+        myMutexLock(&memMutex, MMU_IDX);
+        printf("MMU after receive size %d\n",mmuMemory.size);
+        pthread_mutex_unlock(&memMutex);
+
         ReadWriteType = rxMsg.mtext;
 
-        printf("MMU received message from %d type %s\n",rxMsg.srcMbx,(rxMsg.mtext == WRITE) ? ("write"):("read"));
-        fflush(stdout);
+//        printf("MMU received message from %d type %s\n",rxMsg.srcMbx,(rxMsg.mtext == WRITE) ? ("write"):("read"));
+//
+//        fflush(stdout);
 
         myMutexLock(&memMutex, MMU_IDX);
 
-        // Copy the memory size
-        currMemSize = mmuMemory.size;
-        pthread_mutex_unlock(&memMutex);
+        printf("MMU starting memory size=%d\n",mmuMemory.size);
         currProcessId = rxMsg.srcMbx;
 
-        if (currMemSize==0)
+        if (mmuMemory.size==0)
             missHitStatus = MISS;
         else
             missHitStatus = rand() % 100 < HIT_RATE_IN_PERCENTS? HIT : MISS;
-        printf("");
+        pthread_mutex_unlock(&memMutex);
+        printf("MMU %s\n",(missHitStatus)?("HIT"):("MISS"));
         if (missHitStatus==HIT){
             constructAMessage(&txMsg, MMU_IDX, 1, 'A');
 
@@ -369,7 +382,12 @@ int MMU(){
         }
         else // ITS A MISS
         {
+            myMutexLock(&memMutex, MMU_IDX);
+            currMemSize = mmuMemory.size;
+            pthread_mutex_unlock(&memMutex);
+
             if (currMemSize==N) {
+                printf("MMU calling the evictor\n");
                 // RAISE THE EVICTOR FROM HELL
                 myMutexLock(&evictCondMut, MMU_IDX);
                 state = EVICT_STATE;
@@ -383,7 +401,7 @@ int MMU(){
 
                 pthread_mutex_unlock(&evictCondMut);
             }
-
+            printf("MMU calling the HD\n");
             constructAMessage(&txMsg, MMU_IDX, HD_IDX, 'A');
             // Send a request to HD
             myMsgSend(HD_IDX, &txMsg);
@@ -397,18 +415,25 @@ int MMU(){
             myMutexLock(&memMutex, MMU_IDX);
 
             nextPage = (mmuMemory.start + mmuMemory.size) % N;
+            printf("MMU next page %d\n",nextPage);
             if (ReadWriteType == WRITE){
+                printf("MMU setting dirty\n");
                 mmuMemory.dirtyArr[nextPage] = TRUE;
             }
-
+            printf("MMU setting valid\n");
+            printf("MMU before size %d\n",mmuMemory.size);
             mmuMemory.validArr[nextPage] = TRUE;
-            mmuMemory.size++;
-
+            mmuMemory.size = mmuMemory.size+1;
+            printf("MMU after size %d\n",mmuMemory.size);
             pthread_mutex_unlock(&memMutex);
-
+            printfunc();
+            fflush(stdout);
             // SEND ACK TO THE PROCESS
             constructAMessage(&txMsg, MMU_IDX, 1, 'A');
-            myMsgSend(MMU_IDX, &txMsg);
+            myMsgSend(currProcessId, &txMsg);
+            myMutexLock(&memMutex, MMU_IDX);
+            printf("MMU after ack size %d\n",mmuMemory.size);
+            pthread_mutex_unlock(&memMutex);
         }
     }
 
@@ -428,6 +453,8 @@ void evictorThr(){
         while (state != EVICT_STATE)
             pthread_cond_wait(&condEvict, &evictCondMut);
         pthread_mutex_unlock(&evictCondMut);
+        printf("EVICTOR IS ACTIVE");
+        fflush(stdout);
 
         first_eviction = TRUE;
 
@@ -447,7 +474,9 @@ void evictorThr(){
             }
 
             mmuMemory.validArr[mmuMemory.start] = 0;
-            mmuMemory.size -= 1;
+//            mmuMemory.size -= 1;
+            printf("EVICTOR CLEANING MEM\n");
+            fflush(stdout);
             // cyclic FIFO eviction
             mmuMemory.start = (mmuMemory.start + 1) % N;
 
@@ -467,32 +496,39 @@ void evictorThr(){
 
 // The printer Thread prints checkpoints of the memory every TIME_BETWEEN_SNAPSHOTS[ns]
 void printerThr(){
-    memory memCopy;
     printf("Hi I'm the Printer\n");
-    int i=0;
-    char c;
     while(TRUE){
 
-        myMutexLock(&memMutex,PRINTER_IDX);
-        memCopy = mmuMemory;
-        pthread_mutex_unlock(&memMutex);
-        for (i = 0; i < N; i++){
-            if (memCopy.validArr[i]){
-                if (memCopy.dirtyArr[i]){
-                    c = '0';
-                } else {
-                    c = '1';
-                }
-            } else {
-                c = '-';
-            }
-            printf("%d|%c\n",i,c);
-        }
-        printf("\n\n");
+        printfunc();
         usleep(TIME_BETWEEN_SNAPSHOTS/(double)1000);
     }
 }
+void printfunc(){
+    memory memCopy;
+    int i=0;
 
+    char c;
+    myMutexLock(&memMutex,PRINTER_IDX);
+    memCopy = mmuMemory;
+    pthread_mutex_unlock(&memMutex);
+    printf("PRINTER copy memsize= %d\n",memCopy.size);
+    myMutexLock(&memMutex,PRINTER_IDX);
+    printf("PRINTER real memsize= %d\n",mmuMemory.size);
+    pthread_mutex_unlock(&memMutex);
+    for (i = 0; i < N; i++){
+        if (memCopy.validArr[i]){
+            if (memCopy.dirtyArr[i]){
+                c = '1';
+            } else {
+                c = '0';
+            }
+        } else {
+            c = '-';
+        }
+        printf("%d|%c\n",i,c);
+    }
+    printf("\n\n");
+}
 // Wrapper to the msgrcv function that is responsible for receiving messages and closing the simulation in the case of an error
 int myMsgReceive(int mailBoxId, msgbuf* rxMsg, int msgType){
     if((msgrcv(mailBoxes[mailBoxId] , rxMsg, sizeof(msgbuf) - sizeof(long), msgType,0)) == -1){
