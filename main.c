@@ -12,65 +12,64 @@
 
 
 
-#define TRUE 1
-#define FALSE 0
+
+
+///// RUN CONSTANTS
+//#define HIT_RATE 					0.5
+//#define HIT_RATE_IN_PERCENTS 		HIT_RATE*100
+//#define WR_RATE 					0.5
+////#define WR_RATE_IN_PERCENTS			WR_RATE*100
+//#define SIM_T 					10000000
+//#define TIME_BETWEEN_SNAPSHOTS 	100000
+//#define MEM_WR_T 				1000
+//#define HD_ACCS_T 				10000	//in ns
+//#define INTER_MEM_ACCS_T 		10000	//in ns
+//#define N 				5
+//#define USED_SLOTS_TH 	3
+
+
+/// RUN CONSTANTS
+#define HIT_RATE 					0.5
+#define HIT_RATE_IN_PERCENTS 		HIT_RATE*100
+#define WR_RATE 					0.7
+#define SIM_T 					20			//in seconds
+#define TIME_BETWEEN_SNAPSHOTS 	200000000 	//in ns
+#define MEM_WR_T 				10			//in ns
+#define HD_ACCS_T 				10000000	//in ns
+#define INTER_MEM_ACCS_T 		500000000	//in ns
+#define N 				5
+#define USED_SLOTS_TH 	3
+
+#define TRUE			1
+#define FALSE			0
 #define READ 0
 #define WRITE 1
 #define SEND_FAILED -2
 #define RECV_FAILED -3
 #define MUTEX_LOCK_FAILED -4
 
-/// Probabilities
-#define HIT_RATE 					0.9
-#define HIT_RATE_IN_PERCENTS 		HIT_RATE*100
-#define WR_RATE 					0.7
-#define WR_RATE_IN_PERCENTS			WR_RATE*100
 
-/// Times
-#define SIM_T 					6			//in seconds
-#define TIME_BETWEEN_SNAPSHOTS 	200000000 	//in ns
-#define MEM_WR_T 				10			//in ns
-#define HD_ACCS_T 				10000000	//in ns
-#define INTER_MEM_ACCS_T 		500000000	//in ns
-
-/// Other
-#define N 				10
-#define USED_SLOTS_TH 	5
-#define TRUE			1
-#define FALSE			0
-
-/// MMU State Machine
-// Pages state
-#define INVALID			0
-#define VALID			1
-#define DIRTY			2
-// MMU state
 #define HIT				1
 #define MISS			0
 
-/// Messages
-#define MSG_BUFFER_SIZE 256
-#define PROC_WRITE_REQ	0
-#define PROC_READ_REQ	1
-#define PROC_REQ 		1
-#define MMU_ACK		 	2
-#define HD_REQ 			3
-#define HD_ACK 			4
 
 # define BASE_KEY 1200
 
 
-#define PROC_NUMBER 5
+#define PROC_NUMBER 4
+#define MAIL_BOX_NUMBER 7
 #define THR_NUM 3
 
-# define MMU_IDX 0
-# define PROC1_IDX 1
-# define PROC2_IDX 2
-# define HD_IDX 3
-# define TIMER_IDX 4
-# define MAIN_IDX 5
-# define PRINTER_IDX 6
-# define EVICTOR_IDX 7
+
+# define PROC1_IDX 0
+# define PROC2_IDX 1
+# define HD_IDX 2
+# define TIMER_IDX 3
+# define MAIN_IDX 4
+# define MMU_IDX 5
+# define EVICTOR_IDX 6
+# define PRINTER_IDX 7
+
 
 
 
@@ -82,9 +81,9 @@ typedef struct msgbuf{
     char mtext;
 } msgbuf;
 
-//full == all pages are valid
+// full == all pages are valid
 // empty == all the pages are invalid
-pthread_mutex_t memMutex;
+pthread_mutex_t memMutex = PTHREAD_MUTEX_INITIALIZER;
 typedef struct memory{
     int validArr[N];
     int dirtyArr[N];
@@ -99,7 +98,7 @@ memory mmuMemory;
 //                    ------------------------------------------
 
 // condition variable and mutex for switching control between the mmu and the evictor.
-pthread_mutex_t evictCondMut;
+pthread_mutex_t evictCondMut = PTHREAD_MUTEX_INITIALIZER;
 enum { MMU_STATE, EVICT_STATE } state = MMU_STATE;
 pthread_cond_t      condMmu = PTHREAD_COND_INITIALIZER;
 pthread_cond_t      condEvict = PTHREAD_COND_INITIALIZER;
@@ -119,7 +118,11 @@ void timer();
 int HD();
 void closeSystem();
 void initSystem();
-void killAllProc();
+void killMB();
+void killProc();
+void killMut();
+void killThr();
+
 void printerThr();
 void evictorThr();
 
@@ -127,7 +130,7 @@ void printfunc();
 void constructAMessage(msgbuf* msg, int srcMbx, int mType, char mText);
 //////////////////////////////// prototypes ////////////////////////////////
 
-key_t mailBoxes[PROC_NUMBER+1];
+key_t mailBoxes[MAIL_BOX_NUMBER];
 pid_t processLst[PROC_NUMBER];
 pthread_t threadLst[THR_NUM];
 
@@ -138,36 +141,46 @@ void sig_handler(int signum){
 }
 
 void closeSystem() {
-    // Kill all processes and queues
-    killAllProc();
+    killProc();
+    killThr();
+    killMB();
+    killMut();
+}
 
-    // DESTROY THREADS
-    for (int i=0;i<THR_NUM;i++)
+void killThr(){
+    int i;
+    for (i=0;i<THR_NUM;i++)
     {
         pthread_cancel(threadLst[i]);
     }
+}
+
+void killMut(){
     // DESTROY MUTEX
     pthread_mutex_destroy(&evictCondMut);
     pthread_mutex_destroy(&memMutex);
-
 }
 
-void killAllProc(){
+void killProc(){
     int i;
     // we do not kill the main process here.
     for(i=0;i<PROC_NUMBER;i++){
-        msgctl(mailBoxes[i],IPC_RMID,NULL);
         kill(processLst[i], SIGKILL);
     }
-    // close the main mailbox
-    msgctl(mailBoxes[MAIN_IDX],IPC_RMID,NULL);
+}
+
+void killMB(){
+    int i;
+    for(i=0;i<MAIL_BOX_NUMBER;i++){
+        msgctl(mailBoxes[i],IPC_RMID,NULL);
+    }
 }
 
 void initSystem() {
     int i, j;
 
     // open a mailbox for every process including main
-    for (i=0;i<PROC_NUMBER+1;i++){
+    for (i=0;i<MAIL_BOX_NUMBER;i++){
         if ((mailBoxes[i] = init_mailbox(BASE_KEY+i)) == -1)
         {
             // Roll back
@@ -179,85 +192,56 @@ void initSystem() {
     // open the processes
     for (i=0;i<PROC_NUMBER;i++){
         processLst[i] = fork();
-        if (processLst[i]<0)
+        if (processLst[i]<0){
             // Roll back
             for(j=i;j>=0;j--){
                 kill(processLst[j], SIGKILL);
             }
-        else if (processLst[i]==0){
+            printf("Fork failed rolling back system\n");
+            killMB();
+            exit(1);
+        } else if (processLst[i]==0){
             switch (i) {
                 case HD_IDX:
                     HD();
                     break;
-                case MMU_IDX:
-                    MMU();
-                    break;
                 case TIMER_IDX:
                     timer();
                 case PROC1_IDX:
-                    while(1){;}
                     user_proc(i);
                     break;
                 case PROC2_IDX:
-//                    while(1){;}
                     user_proc(i);
                     break;
             }
         }
     }
-    // Init mutex
-    if (pthread_mutex_init(&memMutex, NULL)){
-        perror("memMutex mutex failed to open!\n");
-        killAllProc();
-        exit(1);
-    }
-
-    if (pthread_mutex_init(&evictCondMut, NULL)){
-        perror("evictCondMut mutex failed to open!\n");
-        pthread_mutex_destroy(&memMutex);
-        killAllProc();
-        exit(1);
-    }
-//    if (pthread_mutex_init(&pagesInUseMutex, NULL)){
-//        puts("Error in initializing counter's mutex!\n");
-//        pthread_mutex_destroy(&pageMutex);
-//        killAllProc();
-//        exit(1);
-//    }
-//    if (pthread_mutex_init(&indexFIFOMutex, NULL)){
-//        puts("Error in initializing index' mutex!\n");
-//        pthread_mutex_destroy(&pageMutex);
-//        pthread_mutex_destroy(&pagesInUseMutex);
-//        killAllProc();
-//        exit(1);
-//    }
-
 
     // Create threads
     if((pthread_create(&threadLst[0], NULL, (void*)MMU, NULL))){
         printf("MMU main thread failed to open\n");
-        pthread_mutex_destroy(&evictCondMut);
-        pthread_mutex_destroy(&memMutex);
-        killAllProc();
+        killMB();
+        killProc();
+        killMut();
         exit(1);
     }
     if((pthread_create(&threadLst[1], NULL, (void*)evictorThr, NULL))){
         printf("Evictor Thread failed to open!\n");
         pthread_cancel(threadLst[0]);
-        pthread_mutex_destroy(&evictCondMut);
-        pthread_mutex_destroy(&memMutex);
-        killAllProc();
+        killMB();
+        killProc();
+        killMut();
         exit(1);
     }
-//    if((pthread_create(&threadLst[2], NULL, (void*)printerThr, NULL))){
-//        printf("Printer Thread Failed to open!\n");
-//        pthread_cancel(threadLst[0]);
-//        pthread_cancel(threadLst[1]);
-//        pthread_mutex_destroy(&evictCondMut);
-//        pthread_mutex_destroy(&memMutex);
-//        killAllProc();
-//        exit(1);
-//    }
+    if((pthread_create(&threadLst[2], NULL, (void*)printerThr, NULL))){
+        printf("Printer Thread Failed to open!\n");
+        pthread_cancel(threadLst[0]);
+        pthread_cancel(threadLst[1]);
+        killMB();
+        killProc();
+        killMut();
+        exit(1);
+    }
 }
 // The starting point of the code and also the main proccess responsible for opening all other procs and threads
 // and in the case one of them failes or the time runs out he also closes the system.
@@ -314,9 +298,8 @@ int HD() {
     while (TRUE) {
         // RECEIVE REQUEST
         myMsgReceive(HD_IDX, &rx, HD_IDX);
+
         // PROCESS
-        printf("HD received messages\n");
-        fflush(stdout);
         usleep(HD_ACCS_T/(double)1000);
         // SEND ACK
         myMsgSend(rx.srcMbx, &tx);
@@ -336,26 +319,20 @@ int MMU(){
     while (TRUE)
     {
         printf("waiting for messages\n");
-        myMutexLock(&memMutex, MMU_IDX);
-        printf("MMU begining size %d\n",mmuMemory.size);
-        pthread_mutex_unlock(&memMutex);
+
         // type is 1 == from a process
 
         myMsgReceive(MMU_IDX, &rxMsg, 1);
 
-        myMutexLock(&memMutex, MMU_IDX);
-        printf("MMU after receive size %d\n",mmuMemory.size);
-        pthread_mutex_unlock(&memMutex);
-
         ReadWriteType = rxMsg.mtext;
 
-//        printf("MMU received message from %d type %s\n",rxMsg.srcMbx,(rxMsg.mtext == WRITE) ? ("write"):("read"));
-//
-//        fflush(stdout);
+
+
 
         myMutexLock(&memMutex, MMU_IDX);
 
-        printf("MMU starting memory size=%d\n",mmuMemory.size);
+
+
         currProcessId = rxMsg.srcMbx;
 
         if (mmuMemory.size==0)
@@ -363,7 +340,8 @@ int MMU(){
         else
             missHitStatus = rand() % 100 < HIT_RATE_IN_PERCENTS? HIT : MISS;
         pthread_mutex_unlock(&memMutex);
-        printf("MMU %s\n",(missHitStatus)?("HIT"):("MISS"));
+        printf("MMU message from %d type %s was a %s\n",rxMsg.srcMbx,(rxMsg.mtext == WRITE) ? ("write"):("read"),(missHitStatus)?("HIT"):("MISS"));
+        fflush(stdout);
         if (missHitStatus==HIT){
             constructAMessage(&txMsg, MMU_IDX, 1, 'A');
 
@@ -401,7 +379,6 @@ int MMU(){
 
                 pthread_mutex_unlock(&evictCondMut);
             }
-            printf("MMU calling the HD\n");
             constructAMessage(&txMsg, MMU_IDX, HD_IDX, 'A');
             // Send a request to HD
             myMsgSend(HD_IDX, &txMsg);
@@ -415,25 +392,15 @@ int MMU(){
             myMutexLock(&memMutex, MMU_IDX);
 
             nextPage = (mmuMemory.start + mmuMemory.size) % N;
-            printf("MMU next page %d\n",nextPage);
             if (ReadWriteType == WRITE){
-                printf("MMU setting dirty\n");
                 mmuMemory.dirtyArr[nextPage] = TRUE;
             }
-            printf("MMU setting valid\n");
-            printf("MMU before size %d\n",mmuMemory.size);
             mmuMemory.validArr[nextPage] = TRUE;
             mmuMemory.size = mmuMemory.size+1;
-            printf("MMU after size %d\n",mmuMemory.size);
             pthread_mutex_unlock(&memMutex);
-            printfunc();
-            fflush(stdout);
             // SEND ACK TO THE PROCESS
             constructAMessage(&txMsg, MMU_IDX, 1, 'A');
             myMsgSend(currProcessId, &txMsg);
-            myMutexLock(&memMutex, MMU_IDX);
-            printf("MMU after ack size %d\n",mmuMemory.size);
-            pthread_mutex_unlock(&memMutex);
         }
     }
 
@@ -443,9 +410,6 @@ int MMU(){
 // The evictor Thread wakes up to clean and free the memory and then sends back the control to the MMU
 void evictorThr(){
     msgbuf hdRxMsg,hdTxMsg;
-    hdTxMsg.mtype  = HD_IDX; // we have a special type for the HD
-    hdTxMsg.srcMbx = EVICTOR_IDX;
-    hdTxMsg.mtext = 'A';
     int first_eviction = TRUE;
     while (1){
         // wait for your turn
@@ -453,32 +417,37 @@ void evictorThr(){
         while (state != EVICT_STATE)
             pthread_cond_wait(&condEvict, &evictCondMut);
         pthread_mutex_unlock(&evictCondMut);
-        printf("EVICTOR IS ACTIVE");
-        fflush(stdout);
+
 
         first_eviction = TRUE;
 
         // we have awoken! start the cleansing!
         myMutexLock(&memMutex,EVICTOR_IDX);
+        printf("EVICTOR IS ACTIVE\n");
+        printf("start index %d\n", mmuMemory.start);
+        fflush(stdout);
         while(mmuMemory.size > USED_SLOTS_TH){
+            printf("EVICTOR CLEANING MEM %s\n",(mmuMemory.dirtyArr[mmuMemory.start])?("DIRTY"):(""));
             // we need to synchronize the HD with the dirty page
             if (mmuMemory.dirtyArr[mmuMemory.start] == 1){
+
                 // free the mutex to allow the mmu to work on the memory while we wait for the HD
                 pthread_mutex_unlock(&memMutex);
                 // send a request for the hard disk and wait for ack
-                myMsgSend(HD_IDX,&hdTxMsg);
-                myMsgReceive(HD_IDX, &hdRxMsg, HD_IDX);
+                constructAMessage(&hdTxMsg,EVICTOR_IDX,HD_IDX,'R');
+                myMsgSend(HD_IDX, &hdTxMsg);
+                myMsgReceive(EVICTOR_IDX, &hdRxMsg, HD_IDX);
                 // hard disk finished take back the control
                 myMutexLock(&memMutex,EVICTOR_IDX);
                 mmuMemory.dirtyArr[mmuMemory.start] = 0;
             }
 
             mmuMemory.validArr[mmuMemory.start] = 0;
-//            mmuMemory.size -= 1;
-            printf("EVICTOR CLEANING MEM\n");
+            mmuMemory.size -= 1;
             fflush(stdout);
             // cyclic FIFO eviction
             mmuMemory.start = (mmuMemory.start + 1) % N;
+
 
             // give back the control to the MMU after the first eviction
             if (first_eviction) {
@@ -488,6 +457,14 @@ void evictorThr(){
                 pthread_mutex_unlock(&evictCondMut);
                 first_eviction = FALSE;
             }
+        }
+        // give back the control to the MMU after the first eviction
+        if (first_eviction) {
+            pthread_mutex_lock(&evictCondMut);
+            state = MMU_STATE;
+            pthread_cond_signal(&condMmu);
+            pthread_mutex_unlock(&evictCondMut);
+            first_eviction = FALSE;
         }
         pthread_mutex_unlock(&memMutex);
     }
@@ -511,10 +488,6 @@ void printfunc(){
     myMutexLock(&memMutex,PRINTER_IDX);
     memCopy = mmuMemory;
     pthread_mutex_unlock(&memMutex);
-    printf("PRINTER copy memsize= %d\n",memCopy.size);
-    myMutexLock(&memMutex,PRINTER_IDX);
-    printf("PRINTER real memsize= %d\n",mmuMemory.size);
-    pthread_mutex_unlock(&memMutex);
     for (i = 0; i < N; i++){
         if (memCopy.validArr[i]){
             if (memCopy.dirtyArr[i]){
@@ -534,7 +507,7 @@ int myMsgReceive(int mailBoxId, msgbuf* rxMsg, int msgType){
     if((msgrcv(mailBoxes[mailBoxId] , rxMsg, sizeof(msgbuf) - sizeof(long), msgType,0)) == -1){
 
         perror("MESSAGE RECEIVE ERROR");
-        printf("RECEIVE ERROR TO ID = %d",mailBoxId);
+        printf("RECEIVE ERROR TO ID = %d", mailBoxId);
         sendStopSim(mailBoxId, RECV_FAILED);
         return FALSE;
     }
@@ -571,7 +544,7 @@ int sendStopSim(int id,int reason){
     data.mtype = 1;
     data.srcMbx = id;
     data.mtext = reason;
-    printf("STOP SIM, id = %d\n",id);
+    printf("STOP SIM, id = %d, reason= %d\n",id, reason);
     // send message to main to stop simulation
     msgsnd(mailBoxes[MAIN_IDX], &data,0, 0);
     exit(reason);
