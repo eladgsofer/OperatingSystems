@@ -1,13 +1,13 @@
-#include <stdio.h>					// Printing simulation
-#include <string.h>					// For strcpy
-#include <stdlib.h>					// Randomizing probabilities
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
 #include <sys/wait.h>
-#include <unistd.h>					// Giving threads a little rest
-#include <pthread.h>				// Managing threads
-#include <sys/ipc.h>				// For message use
-#include <sys/types.h>				// For message use
-#include <sys/msg.h>				// For message use
-#include <sys/errno.h>				// For errno
+#include <unistd.h>
+#include <pthread.h>
+#include <sys/ipc.h>
+#include <sys/types.h>
+#include <sys/msg.h>
+#include <sys/errno.h>
 #include<signal.h>
 
 
@@ -75,16 +75,7 @@
 
 
 
-///////////////////////////////////////////Structs/////////////////////////////////////////////////////
-/* Message struct - as suggested in given material in exercise 5
- * 		There are two fields in the struct:
- * 			[mtype] - Type of message. Each message will have its own type
- * 					  meaning we can use the same message queue for all
- * 					  the messages in the simulation.
- * 			[mtext] - Text to send. Used for debugging purposes (and the
- * 					  message has to include some data aside of [mtype],
- * 					  see given material).
- * */
+
 typedef struct msgbuf{
     long mtype;
     int  srcMbx;
@@ -116,10 +107,13 @@ pthread_cond_t      condEvict = PTHREAD_COND_INITIALIZER;
 //////////////////////////////// prototypes ////////////////////////////////
 int myMsgReceive(int mailBoxId, msgbuf* rxMsg, int msgType);
 void user_proc(int id);
+
 int myMsgSend(int mailBoxId, const msgbuf* msgp);
 int myMutexLock(pthread_mutex_t* mutex,int self_id);
+int init_mailbox(int key);
 
 int sendStopSim(int id,int reason);
+void user_proc(int id);
 int MMU();
 void timer();
 int HD();
@@ -172,7 +166,7 @@ void initSystem() {
 
     // open a mailbox for every process including main
     for (i=0;i<PROC_NUMBER+1;i++){
-        if ((mailBoxes[i] = msgget(BASE_KEY+i, 0600 | IPC_CREAT)) == -1)
+        if ((mailBoxes[i] = init_mailbox(BASE_KEY+i)) == -1)
         {
             // Roll back
             for(j=i;j>=0;j--)
@@ -199,11 +193,11 @@ void initSystem() {
                 case TIMER_IDX:
                     timer();
                 case PROC1_IDX:
-                      while(1){;}
-//                    user_proc(i);
+                    while(1){;}
+                    user_proc(i);
                     break;
                 case PROC2_IDX:
-//                      while(1){;}
+//                    while(1){;}
                     user_proc(i);
                     break;
             }
@@ -263,7 +257,8 @@ void initSystem() {
         exit(1);
     }
 }
-
+// The starting point of the code and also the main proccess responsible for opening all other procs and threads
+// and in the case one of them failes or the time runs out he also closes the system.
 int main() {
     msgbuf return_msg;
     signal(SIGKILL, sig_handler); // Register signal handler
@@ -437,14 +432,14 @@ void evictorThr(){
         while(mmuMemory.size > USED_SLOTS_TH){
             // we need to synchronize the HD with the dirty page
             if (mmuMemory.dirtyArr[mmuMemory.start] == 1){
-                mmuMemory.dirtyArr[mmuMemory.start] = 0;
-                // free the mutex to allow the mmu to work on the memory
+                // free the mutex to allow the mmu to work on the memory while we wait for the HD
                 pthread_mutex_unlock(&memMutex);
                 // send a request for the hard disk and wait for ack
                 myMsgSend(HD_IDX,&hdTxMsg);
                 myMsgReceive(HD_IDX, &hdRxMsg, HD_IDX);
                 // hard disk finished take back the control
                 myMutexLock(&memMutex,EVICTOR_IDX);
+                mmuMemory.dirtyArr[mmuMemory.start] = 0;
             }
 
             mmuMemory.validArr[mmuMemory.start] = 0;
@@ -494,9 +489,10 @@ void printerThr(){
     }
 }
 
-
+// Wrapper to the msgrcv function that is responsible for receiving messages and closing the simulation in the case of an error
 int myMsgReceive(int mailBoxId, msgbuf* rxMsg, int msgType){
     if((msgrcv(mailBoxes[mailBoxId] , rxMsg, sizeof(msgbuf) - sizeof(long), msgType,0)) == -1){
+
         perror("MESSAGE RECEIVE ERROR");
         printf("RECEIVE ERROR TO ID = %d",mailBoxId);
         sendStopSim(mailBoxId, RECV_FAILED);
@@ -545,4 +541,26 @@ void timer(){
     sleep(SIM_T);
     printf("times up!\n");
     sendStopSim(TIMER_IDX,0);
+}
+// a wrapper to the msgget function which other than getting the requested mailbox also flushes it from any existing
+// messages
+int init_mailbox(int key){
+    int mailbox;
+    int sizeOfMsg = sizeof(msgbuf)-sizeof(long);
+    msgbuf tempMsg;
+    if ((mailbox = msgget(key, 0600 | IPC_CREAT)) == -1){
+        return -1; // failed to open mailbox
+    }
+
+    // flush mailbox
+    while(msgrcv(mailbox, &tempMsg, sizeOfMsg , 0 , IPC_NOWAIT) != -1){
+        printf("FLUSH CLEANED MESSAGE from mailbox id = %d\n",key-BASE_KEY);
+    }
+
+    // test the stop reason to make sure we stoped flushing because the mailbox is empty
+    if (errno != ENOMSG){
+        perror("MSGGET FAILED!");
+        return -1;
+    }
+    return mailbox;
 }
