@@ -22,7 +22,7 @@
 #define HD_ACCS_T 				10000000
 #define INTER_MEM_ACCS_T 		500000000
 #define N 				5
-#define USED_SLOTS_TH 	3
+#define USED_SLOTS_TH 	1
 
 #define TRUE 1
 #define FALSE 0
@@ -250,10 +250,11 @@ int main() {
 
 
 void user_proc(int id){
+
     /*
     * the function responsible for the consumer processes
     */
-//    printf("Hi I'm User %d\n", id);
+
     float writeProb = 0;
     msgbuf tx,rx;
     tx.mtype = 1; // general type
@@ -266,7 +267,6 @@ void user_proc(int id){
         } else { // read
             tx.mtext = READ;
         }
-//        printf("user id = %d->MMU\n",id);
         // send request to the MMU
         myMsgSend(MMU_IDX,&tx);
         // wait for ack
@@ -320,7 +320,6 @@ int MMU(){
 
     while (TRUE)
     {
-//        printf("waiting for messages\n");
 
         // type is 1 == from a process
 
@@ -332,13 +331,13 @@ int MMU(){
 
         currProcessId = rxMsg.srcMbx;
 
-        if (mmuMemory.size==0)
+        if (mmuMemory.size==0){
             missHitStatus = MISS;
-        else
+        } else{
             missHitStatus = rand() % 100 < HIT_RATE_IN_PERCENTS? HIT : MISS;
+        }
+
         pthread_mutex_unlock(&memMutex);
-//        printf("MMU message from %d type %s was a %s\n",rxMsg.srcMbx,(rxMsg.mtext == WRITE) ? ("write"):("read"),(missHitStatus)?("HIT"):("MISS"));
-        fflush(stdout);
         if (missHitStatus==HIT){ // Its a HIT
             constructAMessage(&txMsg, MMU_IDX, 1, 'A');
 
@@ -426,10 +425,8 @@ void evictorThr(){
 
         // we have awoken! start the cleansing!
         myMutexLock(&memMutex,EVICTOR_IDX);
-//        printf("EVICTOR IS ACTIVE\n");
         fflush(stdout);
         while(mmuMemory.size > USED_SLOTS_TH){
-//            printf("EVICTOR CLEANING MEM %s\n",(mmuMemory.dirtyArr[mmuMemory.start])?("DIRTY"):(""));
             // we need to synchronize the HD with the dirty page
             if (mmuMemory.dirtyArr[mmuMemory.start] == 1){
 
@@ -477,7 +474,6 @@ void evictorThr(){
  * The printer Thread prints checkpoints of the memory every TIME_BETWEEN_SNAPSHOTS[ns]
  */
 void printerThr(){
-//    printf("Hi I'm the Printer\n");
     while(TRUE){
 
         printfunc();
@@ -574,7 +570,6 @@ int sendStopSim(int id,int reason){
     data.mtype = 1;
     data.srcMbx = id;
     data.mtext = reason;
-//    printf("STOP SIM, id = %d, reason= %d\n",id, reason);
     // send message to main to stop simulation
     msgsnd(mailBoxes[MAIN_IDX], &data,0, 0);
     exit(reason);
@@ -585,9 +580,8 @@ void timer(){
      * The timer process. it's whole purpose is to go to sleep and wake up when the simulation is over
      * waking the main process and telling it to shut the system down.
      */
-//    printf("hi Im Timer!\n");
+
     sleep(SIM_T);
-//    printf("times up!\n");
     sendStopSim(TIMER_IDX,0);
 }
 
@@ -604,7 +598,6 @@ int init_mailbox(int key){
 
     // flush mailbox
     while(msgrcv(mailbox, &tempMsg, sizeOfMsg , 0 , IPC_NOWAIT) != -1){
-//        printf("FLUSH CLEANED MESSAGE from mailbox id = %d\n",key-BASE_KEY);
     }
 
     // test the stop reason to make sure we stoped flushing because the mailbox is empty
