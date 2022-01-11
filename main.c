@@ -1,66 +1,50 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <sys/wait.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <sys/ipc.h>
-#include <sys/types.h>
 #include <sys/msg.h>
 #include <sys/errno.h>
-#include<signal.h>
-
-
-
-
-
-///// RUN CONSTANTS
-//#define HIT_RATE 					0.5
-//#define HIT_RATE_IN_PERCENTS 		HIT_RATE*100
-//#define WR_RATE 					0.5
-////#define WR_RATE_IN_PERCENTS			WR_RATE*100
-//#define SIM_T 					10000000
-//#define TIME_BETWEEN_SNAPSHOTS 	100000
-//#define MEM_WR_T 				1000
-//#define HD_ACCS_T 				10000	//in ns
-//#define INTER_MEM_ACCS_T 		10000	//in ns
-//#define N 				5
-//#define USED_SLOTS_TH 	3
+#include <signal.h>
 
 
 /// RUN CONSTANTS
 #define HIT_RATE 					0.5
 #define HIT_RATE_IN_PERCENTS 		HIT_RATE*100
 #define WR_RATE 					0.7
-#define SIM_T 					20			//in seconds
-#define TIME_BETWEEN_SNAPSHOTS 	200000000 	//in ns
-#define MEM_WR_T 				10			//in ns
-#define HD_ACCS_T 				10000000	//in ns
-#define INTER_MEM_ACCS_T 		500000000	//in ns
+// in [s]
+#define SIM_T 					20
+// In [nS]
+#define TIME_BETWEEN_SNAPSHOTS 	200000000
+#define MEM_WR_T 				10
+#define HD_ACCS_T 				10000000
+#define INTER_MEM_ACCS_T 		500000000
 #define N 				5
 #define USED_SLOTS_TH 	3
 
-#define TRUE			1
-#define FALSE			0
+#define TRUE 1
+#define FALSE 0
 #define READ 0
 #define WRITE 1
-#define SEND_FAILED -2
-#define RECV_FAILED -3
-#define MUTEX_LOCK_FAILED -4
+/// ERRORS
+#define SEND_FAILED (-2)
+#define RECV_FAILED (-3)
+#define MUTEX_LOCK_FAILED (-4)
 
 
 #define HIT				1
 #define MISS			0
 
-
+/// Base key for mailbox creation
 # define BASE_KEY 1200
 
-
+/// Number of components to create
 #define PROC_NUMBER 4
 #define MAIL_BOX_NUMBER 7
 #define THR_NUM 3
 
-
+/// Components Indexes
 # define PROC1_IDX 0
 # define PROC2_IDX 1
 # define HD_IDX 2
@@ -70,17 +54,14 @@
 # define EVICTOR_IDX 6
 # define PRINTER_IDX 7
 
-
-
-
-
-
+/// MessageBox object
 typedef struct msgbuf{
     long mtype;
     int  srcMbx;
     char mtext;
 } msgbuf;
 
+/// Memory objects
 // full == all pages are valid
 // empty == all the pages are invalid
 pthread_mutex_t memMutex = PTHREAD_MUTEX_INITIALIZER;
@@ -92,6 +73,7 @@ typedef struct memory{
 } memory;
 memory mmuMemory;
 
+/// Memory illustration
 //                                   S + size
 //                         | UNUSED  |   USED
 //                    ---->|         |------------------------->
@@ -103,7 +85,7 @@ enum { MMU_STATE, EVICT_STATE } state = MMU_STATE;
 pthread_cond_t      condMmu = PTHREAD_COND_INITIALIZER;
 pthread_cond_t      condEvict = PTHREAD_COND_INITIALIZER;
 
-//////////////////////////////// prototypes ////////////////////////////////
+/// Prototypes
 int myMsgReceive(int mailBoxId, msgbuf* rxMsg, int msgType);
 void user_proc(int id);
 
@@ -112,7 +94,6 @@ int myMutexLock(pthread_mutex_t* mutex,int self_id);
 int init_mailbox(int key);
 
 int sendStopSim(int id,int reason);
-void user_proc(int id);
 int MMU();
 void timer();
 int HD();
@@ -128,7 +109,6 @@ void evictorThr();
 
 void printfunc();
 void constructAMessage(msgbuf* msg, int srcMbx, int mType, char mText);
-//////////////////////////////// prototypes ////////////////////////////////
 
 key_t mailBoxes[MAIL_BOX_NUMBER];
 pid_t processLst[PROC_NUMBER];
@@ -136,11 +116,12 @@ pthread_t threadLst[THR_NUM];
 
 
 void sig_handler(int signum){
-//    printf("caught signal %d", signum);
+    // in case of a KILL/INTR signal - Close the System accordingly.
     closeSystem();
 }
 
 void closeSystem() {
+    // Close the entire system - free all the resources
     killProc();
     killThr();
     killMB();
@@ -148,6 +129,7 @@ void closeSystem() {
 }
 
 void killThr(){
+    // Cancel all the threads
     int i;
     for (i=0;i<THR_NUM;i++)
     {
@@ -156,20 +138,21 @@ void killThr(){
 }
 
 void killMut(){
-    // DESTROY MUTEX
+    // Destroy all the mutexes
     pthread_mutex_destroy(&evictCondMut);
     pthread_mutex_destroy(&memMutex);
 }
 
 void killProc(){
+    // kill all the processes beside the  main process.
     int i;
-    // we do not kill the main process here.
     for(i=0;i<PROC_NUMBER;i++){
         kill(processLst[i], SIGKILL);
     }
 }
 
 void killMB(){
+    // Destroy all the mailBoxes queues
     int i;
     for(i=0;i<MAIL_BOX_NUMBER;i++){
         msgctl(mailBoxes[i],IPC_RMID,NULL);
@@ -205,13 +188,19 @@ void initSystem() {
                 case HD_IDX:
                     HD();
                     break;
+
                 case TIMER_IDX:
                     timer();
+                    break;
+
                 case PROC1_IDX:
                     user_proc(i);
                     break;
+
                 case PROC2_IDX:
                     user_proc(i);
+                    break;
+                default:
                     break;
             }
         }
@@ -250,10 +239,9 @@ int main() {
     signal(SIGKILL, sig_handler); // Register signal handler
     signal(SIGTERM, sig_handler); // Register signal handler
     initSystem();
+    // Wait until a termination message arrives from one of the components or the timer component
     msgrcv(mailBoxes[MAIN_IDX], &return_msg,sizeof(msgbuf) - sizeof(long), 1,0);
     closeSystem();
-//    printf("closing system\n");
-//    printf("closed by: %d for reason: %d", return_msg.srcMbx,return_msg.mtext);
     return 0;
 }
 
@@ -283,18 +271,24 @@ void user_proc(int id){
     }
 }
 void constructAMessage(msgbuf* msg, int srcMbx, int mType, char mText){
+    /*
+     * Construct a msgbuf object via the params of our API.
+     * mtext = the data in the message
+     * mtype = the message type
+     * srcMbx = which component id the message arrived from.
+     */
     msg->mtext=mText;
     msg->mtype = mType;
     msg->srcMbx=srcMbx;
 }
 // The Hard Disk processes responsible for simulating the mechanisms of a hard disk by wasting time
-
 int HD() {
+    /*
+     * Hard Disk component - The HD Thread's target function, the function takes
+     * requests from the MMU & Evictor, sleeps and return an Ack for the requester.
+     */
 
     msgbuf tx, rx;
-/*    tx.mtype = 1;
-    tx.srcMbx = HD_IDX;
-    tx.mtext = 'A';*/
     constructAMessage(&tx, HD_IDX, HD_IDX, 'A');
 
     while (TRUE) {
@@ -308,9 +302,12 @@ int HD() {
     }
 }
 
-// Responsible for the managment of the memory unit
 int MMU(){
-//    printf("hi Im MMU!\n");
+    /*
+     * MMU component - The MMU target function, Responsible for the flow's management of the memory unit
+     * Responsible for receiving Page requests from the Processes' components and handling them as described
+     * in EX5.
+     */
     msgbuf rxMsg, txMsg;
     int randPage, nextPage;
     int currMemSize;
@@ -328,12 +325,7 @@ int MMU(){
 
         ReadWriteType = rxMsg.mtext;
 
-
-
-
         myMutexLock(&memMutex, MMU_IDX);
-
-
 
         currProcessId = rxMsg.srcMbx;
 
@@ -344,7 +336,7 @@ int MMU(){
         pthread_mutex_unlock(&memMutex);
 //        printf("MMU message from %d type %s was a %s\n",rxMsg.srcMbx,(rxMsg.mtext == WRITE) ? ("write"):("read"),(missHitStatus)?("HIT"):("MISS"));
         fflush(stdout);
-        if (missHitStatus==HIT){
+        if (missHitStatus==HIT){ // Its a HIT
             constructAMessage(&txMsg, MMU_IDX, 1, 'A');
 
             if (ReadWriteType == WRITE)
@@ -352,7 +344,9 @@ int MMU(){
                 usleep(MEM_WR_T/(double)1000);
 
                 myMutexLock(&memMutex, MMU_IDX);
+                // Randomize a page since it's a hit flow as described
                 randPage = (mmuMemory.start + ((int)rand()%mmuMemory.size)) % N;
+                // since it's write - it should be dirty
                 mmuMemory.dirtyArr[randPage] = TRUE;
                 pthread_mutex_unlock(&memMutex);
             }
@@ -367,14 +361,13 @@ int MMU(){
             pthread_mutex_unlock(&memMutex);
 
             if (currMemSize==N) {
-//                printf("MMU calling the evictor\n");
-                // RAISE THE EVICTOR FROM HELL
+                // Raise the evictor via condition signaling and changing the state.
                 myMutexLock(&evictCondMut, MMU_IDX);
                 state = EVICT_STATE;
                 pthread_cond_signal(&condEvict);
                 pthread_mutex_unlock(&evictCondMut);
 
-                // WAIT FOR THE EVICTOR TO FINISH
+                // wait for the evictor to finish. (to raise the MMU up via condition signal)
                 myMutexLock(&evictCondMut, MMU_IDX);
                 while (state != MMU_STATE)
                     pthread_cond_wait(&condMmu, &evictCondMut);
@@ -390,29 +383,32 @@ int MMU(){
             // The memory is not full, and now it's a hit since the page is inside.
             usleep(MEM_WR_T/(double)1000);
 
-            /// Memory access - now its a hit
+            // Memory access - now its a hit since the page is brought to memory.
             myMutexLock(&memMutex, MMU_IDX);
-
+            // Calculate the next page in the FIFO
             nextPage = (mmuMemory.start + mmuMemory.size) % N;
+            // if a WRITE request, the page's dirty bit is ON
             if (ReadWriteType == WRITE){
                 mmuMemory.dirtyArr[nextPage] = TRUE;
             }
+            // the page is being used
             mmuMemory.validArr[nextPage] = TRUE;
+            // raising the page count
             mmuMemory.size = mmuMemory.size+1;
+
             pthread_mutex_unlock(&memMutex);
-            // SEND ACK TO THE PROCESS
+            // send an ACK the the process.
             constructAMessage(&txMsg, MMU_IDX, 1, 'A');
             myMsgSend(currProcessId, &txMsg);
         }
     }
-
-    exit(1);
 }
 
-/*
- * The evictor Thread wakes up to clean and free the memory and then sends back the control to the MMU
- */
+
 void evictorThr(){
+    /*
+    * The evictor Thread wakes up to clean and free the memory and then sends back the control to the MMU
+    */
     msgbuf hdRxMsg,hdTxMsg;
     int first_eviction = TRUE;
     while (1){
@@ -491,7 +487,7 @@ void printerThr(){
  */
 void printfunc(){
     memory memCopy;
-    int i=0;
+    int i;
 
     char c;
     myMutexLock(&memMutex,PRINTER_IDX);
@@ -511,8 +507,16 @@ void printfunc(){
     }
     printf("\n\n");
 }
-// Wrapper to the msgrcv function that is responsible for receiving messages and closing the simulation in the case of an error
+
 int myMsgReceive(int mailBoxId, msgbuf* rxMsg, int msgType){
+    /*
+     * A Wrapper to the msgrcv function that is responsible for receiving messages and closing
+     * the simulation in the case of an error
+     * Input:
+     *      MailBoxId: MailboxId of the component, meaning - which mailbox is being looked
+     *      rxMsg: the message object to insert the details to after the message was received
+     *      msgType: which type to listen to.
+     */
     if((msgrcv(mailBoxes[mailBoxId] , rxMsg, sizeof(msgbuf) - sizeof(long), msgType,0)) == -1){
 
         perror("MESSAGE RECEIVE ERROR");
